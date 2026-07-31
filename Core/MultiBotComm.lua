@@ -399,6 +399,26 @@ function Comm.RunPositionCommand(scope, target, command)
   return Comm.Send("RUN", "POSITION~" .. scope .. "~" .. urlEncodeField(target) .. "~" .. token .. "~" .. urlEncodeField(command))
 end
 
+-- Necro-Network graveyard hop. Unlike the other RUN verbs this acts on the
+-- requesting player rather than on bots, so it takes no scope or target.
+function Comm.RunGraveyardCommand(graveyardId)
+  local state = ensureBridgeState()
+
+  if not state.connected then
+    return false
+  end
+
+  graveyardId = tonumber(graveyardId)
+  if not graveyardId or graveyardId <= 0 then
+    return false
+  end
+
+  state.graveyardSeq = (tonumber(state.graveyardSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-graveyard-" .. tostring(state.graveyardSeq)
+
+  return Comm.Send("RUN", "GRAVEYARD~" .. tostring(math.floor(graveyardId)) .. "~" .. token)
+end
+
 function Comm.RunFormationCommand(scope, target, command)
   local state = ensureBridgeState()
 
@@ -3123,6 +3143,31 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
     state.connected = true
     state.lastError = nil
     debugPrint("ADDON:RX", "COMBAT_ACK", payload or "")
+    return true
+  end
+
+  if opcode == "GRAVEYARD_ACK" then
+    state.connected = true
+    state.lastError = nil
+    debugPrint("ADDON:RX", "GRAVEYARD_ACK", payload or "")
+
+    local rest = select(2, splitOnce(payload or "", "~"))
+    local _, result = splitOnce(rest, "~")
+    result = trim(result)
+
+    -- A refusal is silent from the player's point of view -- they clicked and
+    -- simply did not move -- so surface the reason rather than leaving them to
+    -- guess whether the click registered at all.
+    if result ~= "OK" and result ~= "" then
+      local reasons = {
+        IN_COMBAT = L("necronet.error.combat", "Necro-Network: cannot teleport while in combat."),
+        IN_BATTLEGROUND = L("necronet.error.battleground", "Necro-Network: cannot teleport inside a battleground or arena."),
+        NO_SUCH_GRAVEYARD = L("necronet.error.unknown", "Necro-Network: unknown graveyard."),
+        BAD_COORDS = L("necronet.error.coords", "Necro-Network: that graveyard has invalid coordinates."),
+      }
+      systemMessage(reasons[result] or L("necronet.error.generic", "Necro-Network: teleport refused."))
+    end
+
     return true
   end
 
