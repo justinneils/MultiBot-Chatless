@@ -580,6 +580,18 @@ for key, value in pairs(MultiBot.data.necronet) do
 	tButton:Hide()
 
 	tButton.doLeft = function(pButton)
+		-- Bridge-first. ".go graveyard" needs RBAC_PERM_COMMAND_GO, which also
+		-- carries ".go xyz", so requiring it would mean granting every account
+		-- teleport-to-anywhere just to use Necro-Network. The bridge resolves the
+		-- graveyard id server-side instead, so no extra permission is needed.
+		-- The command stays as a fallback for GM accounts if the bridge is down.
+		local comm = MultiBot.Comm
+
+		if comm and type(comm.RunGraveyardCommand) == "function"
+			and comm.RunGraveyardCommand(pButton.graveyard) then
+			return
+		end
+
 		MultiBot.doDot(".go graveyard", pButton.graveyard)
 	end
 
