@@ -6,16 +6,29 @@ local MODE_BUTTON_ICON = "Interface\\AddOns\\MultiBot\\Icons\\mode_passive.blp"
 local MODE_FRAME_X = -172
 local MODE_FRAME_Y = 34
 
-local function bindModeToggleAction(modeButton, enableCommand, disableCommand)
-    modeButton.setEnable().doLeft = function(button)
-        if MultiBot.OnOffSwitch(button) then
-            MultiBot.ActionToGroup(enableCommand)
-        else
-            MultiBot.ActionToGroup(disableCommand)
-        end
+-- MB_P1A_MODE_BLOCKED_STATE_V1_START
+local function dispatchModeToggleAction(button, enableCommand, disableCommand)
+    local wasEnabled = button.state == true
+    local command = wasEnabled and disableCommand or enableCommand
+
+    if not MultiBot.ActionToGroup(command) then
+        return false
     end
+
+    if wasEnabled then
+        button.setDisable()
+    else
+        button.setEnable()
+    end
+    return true
 end
 
+local function bindModeToggleAction(modeButton, enableCommand, disableCommand)
+    modeButton.setEnable().doLeft = function(button)
+        dispatchModeToggleAction(button, enableCommand, disableCommand)
+    end
+end
+-- MB_P1A_MODE_BLOCKED_STATE_V1_END
 local function createModeUI(tLeft)
     local modeButton = tLeft.addButton(MODE_BUTTON_NAME, -170, 0, MODE_BUTTON_ICON, MultiBot.L("tips.mode.master")).setDisable()
 
@@ -24,13 +37,8 @@ local function createModeUI(tLeft)
     end
 
     modeButton.doLeft = function(button)
-        if MultiBot.OnOffSwitch(button) then
-            MultiBot.ActionToGroup("co +passive,?")
-        else
-            MultiBot.ActionToGroup("co -passive,?")
-        end
+        dispatchModeToggleAction(button, "co +passive,?", "co -passive,?")
     end
-
     local modeFrame = tLeft.addFrame(MODE_FRAME_NAME, MODE_FRAME_X, MODE_FRAME_Y)
     modeFrame:Hide()
 

@@ -8,48 +8,161 @@ local FORMATION_FRAME_Y = 34
 local FORMATION_CELL_WIDTH = 40
 local FORMATION_CELL_HEIGHT = 30
 
+local latestFormationToken = nil
+local latestFormationQueryToken = nil
+local latestFormationTooltipToken = nil
+
 local FORMATION_BUTTONS = {
-    { name = "Arrow", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_arrow.blp", cmd = "formation arrow" },
-    { name = "Queue", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_queue.blp", cmd = "formation queue" },
-    { name = "Near", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_near.blp", cmd = "formation near" },
-    { name = "Melee", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_melee.blp", cmd = "formation melee" },
-    { name = "Line", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_line.blp", cmd = "formation line" },
-    { name = "Circle", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_circle.blp", cmd = "formation circle" },
-    { name = "Chaos", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_chaos.blp", cmd = "formation chaos" },
-    { name = "Shield", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_shield.blp", cmd = "formation shield" },
-    -- Reuses the generic formation icon: there is no formation_far.blp artwork yet.
-    { name = "Far", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation.blp", cmd = "formation far" },
+    { name = "Arrow", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_arrow.blp", value = "arrow" },
+    { name = "Queue", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_queue.blp", value = "queue" },
+    { name = "Near", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_near.blp", value = "near" },
+    { name = "Melee", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_melee.blp", value = "melee" },
+    { name = "Line", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_line.blp", value = "line" },
+    { name = "Circle", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_circle.blp", value = "circle" },
+    { name = "Chaos", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_chaos.blp", value = "chaos" },
+    { name = "Shield", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation_shield.blp", value = "shield" },
+    -- Local addition: mod-playerbots supports a ninth formation, "far", which follows
+    -- at AiPlayerbot.FarDistance (20 yards by default) rather than the 1.5 the other
+    -- follow formations use -- useful while stealthed or scouting. Upstream's button
+    -- list omits it, and it also needs "far" in IsAllowedFormationName server-side or
+    -- the bridge rejects it. Reuses the generic icon: there is no formation_far.blp.
+    { name = "Far", icon = "Interface\\AddOns\\MultiBot\\Icons\\formation.blp", value = "far" },
 }
 
--- Bridge-first. The bridge sets the formation natively, so nothing is sent to
--- party/raid chat and the bots do not whisper "Formation set to: x" back. The
--- chat path stays as a fallback so the button still works when the server-side
--- module is absent or the bridge has not finished its handshake.
-local function applyFormation(button, definition)
-    local parent = button.parent.parent
-    local comm = MultiBot.Comm
-
-    if comm and type(comm.RunFormationCommand) == "function"
-        and comm.RunFormationCommand("ALL", "", definition.cmd) then
-        local frame = parent.frames[FORMATION_FRAME_NAME]
-        local rootButton = parent.buttons[FORMATION_BUTTON_NAME]
-
-        if rootButton and rootButton.setTexture then
-            rootButton.setTexture(button.texture)
+local function formationText(key)
+    if MultiBot and type(MultiBot.L) == "function" then
+        local value = MultiBot.L(key)
+        if type(value) == "string" and value ~= "" then
+            return value
         end
-
-        if frame then
-            frame:Hide()
-
-            if MultiBot.RequestClickBlockerUpdate then
-                MultiBot.RequestClickBlockerUpdate(frame)
-            end
-        end
-
-        return true
     end
 
-    return MultiBot.SelectToGroup(parent, FORMATION_FRAME_NAME, button.texture, definition.cmd)
+    return key
+end
+
+local function formationLabel(value)
+    local normalized = string.lower(tostring(value or "?"))
+    local key = "formation.name." .. normalized
+
+    if normalized == "?" then
+        key = "formation.name.unknown"
+    end
+
+    local label = formationText(key)
+    if label == key then
+        return normalized
+    end
+
+    return label
+end
+
+local function hideFormationTooltip(token, owner)
+    if token ~= latestFormationTooltipToken then
+        return
+    end
+
+    latestFormationTooltipToken = nil
+
+    if not GameTooltip or not GameTooltip.GetOwner or not GameTooltip.Hide then
+        return
+    end
+
+    if GameTooltip:GetOwner() ~= owner then
+        return
+    end
+
+    GameTooltip:Hide()
+end
+
+local function showFormationTooltip(button, result)
+    if not button or not GameTooltip then
+        return
+    end
+
+    local token = result and result.token or tostring(GetTime and GetTime() or 0)
+    latestFormationTooltipToken = token
+
+    GameTooltip:SetOwner(button, "ANCHOR_TOPRIGHT", 0 - (button.size or 32), 2)
+    GameTooltip:ClearLines()
+    GameTooltip:AddLine(formationText("formation.query.title"), 1, 0.82, 0)
+
+    if not result or result.status == "unavailable" then
+        GameTooltip:AddLine(formationText("formation.query.unavailable"), 1, 0.25, 0.25, true)
+    elseif result.status == "timeout" then
+        GameTooltip:AddLine(formationText("formation.query.timeout"), 1, 0.25, 0.25, true)
+    else
+        local items = result.items or {}
+        local count = #items
+
+        if count == 0 then
+            GameTooltip:AddLine(formationText("formation.query.empty"), 0.8, 0.8, 0.8, true)
+        else
+            local commonFormation = items[1] and items[1].formation or "?"
+            local mixed = false
+
+            for index = 2, count do
+                if items[index].formation ~= commonFormation then
+                    mixed = true
+                    break
+                end
+            end
+
+            if mixed then
+                GameTooltip:AddLine(formationText("formation.query.mixed"), 1, 0.65, 0.2)
+            else
+                GameTooltip:AddLine(
+                    string.format(
+                        formationText("formation.query.common"),
+                        formationLabel(commonFormation),
+                        count
+                    ),
+                    0.35,
+                    1,
+                    0.35
+                )
+            end
+
+            GameTooltip:AddLine(" ")
+            for _, item in ipairs(items) do
+                GameTooltip:AddDoubleLine(
+                    tostring(item.botName or "?"),
+                    formationLabel(item.formation),
+                    1,
+                    1,
+                    1,
+                    0.5,
+                    0.82,
+                    1
+                )
+            end
+        end
+    end
+
+    GameTooltip:Show()
+
+    if MultiBot and type(MultiBot.TimerAfter) == "function" then
+        MultiBot.TimerAfter(8.0, function()
+            hideFormationTooltip(token, button)
+        end)
+    end
+end
+
+local function applyFormationSelection(parent, texture)
+    if not parent or not parent.frames or not parent.buttons then
+        return
+    end
+
+    local frame = parent.frames[FORMATION_FRAME_NAME]
+    local button = parent.buttons[FORMATION_BUTTON_NAME]
+    if not frame or not button then
+        return
+    end
+
+    button.setTexture(texture)
+    frame:Hide()
+    if MultiBot.RequestClickBlockerUpdate then
+        MultiBot.RequestClickBlockerUpdate(frame)
+    end
 end
 
 local function addFormationButton(frame, definition, column, row)
@@ -60,7 +173,29 @@ local function addFormationButton(frame, definition, column, row)
         definition.icon,
         MultiBot.L("tips.format." .. string.lower(definition.name))
     ).doLeft = function(button)
-        applyFormation(button, definition)
+        if not MultiBot.Comm or not MultiBot.Comm.RunFormationCommand then
+            return
+        end
+
+        local parent = button.parent and button.parent.parent
+        local token
+        token = MultiBot.Comm.RunFormationCommand("GROUP", "", definition.value, function(result)
+            if not result or result.token ~= latestFormationToken then
+                return
+            end
+
+            latestFormationToken = nil
+            if result.success > 0
+                and result.failure == 0
+                and result.formation == definition.value
+            then
+                applyFormationSelection(parent, definition.icon)
+            end
+        end)
+
+        if token then
+            latestFormationToken = token
+        end
     end
 end
 
@@ -81,8 +216,28 @@ function MultiBot.BuildFormationUI(tLeft)
         MultiBot.ShowHideSwitch(button.parent.frames[FORMATION_FRAME_NAME])
     end
 
-    formatButton.doRight = function()
-        MultiBot.ActionToGroup("formation")
+    formatButton.doRight = function(button)
+        if not MultiBot.Comm or not MultiBot.Comm.RequestFormations then
+            showFormationTooltip(button, { status = "unavailable" })
+            return
+        end
+
+        local token
+        token = MultiBot.Comm.RequestFormations(function(result)
+            if not result or result.token ~= latestFormationQueryToken then
+                return
+            end
+
+            latestFormationQueryToken = nil
+            showFormationTooltip(button, result)
+        end)
+
+        if token then
+            latestFormationQueryToken = token
+        else
+            latestFormationQueryToken = nil
+            showFormationTooltip(button, { status = "unavailable" })
+        end
     end
 
     local formatFrame = tLeft.addFrame(FORMATION_FRAME_NAME, FORMATION_FRAME_X, FORMATION_FRAME_Y)
