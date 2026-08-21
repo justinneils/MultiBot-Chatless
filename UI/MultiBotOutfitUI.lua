@@ -952,10 +952,43 @@ function OutfitUI:RequestList(botName)
     self.listButtons = self.listButtons or {}
     self.itemButtons = self.itemButtons or {}
 
+    local previousBotName = self.botName
+
     self.botName = botName
     if self.frame and self.frame.setBotName then
         self.frame:setBotName(botName)
     end
+
+    local bridgeState = MultiBot.bridge
+    local bridgeOutfitCapable = bridgeState
+        and bridgeState.connected == true
+        and bridgeState.outfitCapable == true
+
+    if not bridgeOutfitCapable and MultiBot.allowLegacyChatFallback ~= true then
+        if bridgeState then
+            bridgeState.lastError = "OUTFIT_CAPABILITY_UNAVAILABLE"
+        end
+
+        if previousBotName ~= botName then
+            self.entries = {}
+            self.selectedName = nil
+            self.pendingBot = nil
+            self.bridgeToken = nil
+            self.requestToken = (self.requestToken or 0) + 1
+            self:RenderEntryList()
+            self:RenderSelectedOutfit()
+        end
+
+        self:SetStatus(outfitL("bridge_unavailable"))
+        local unavailableWaitButton = getUnitWaitButton(botName)
+        if unavailableWaitButton and unavailableWaitButton.waitFor == "OUTFITS" then
+            unavailableWaitButton.waitFor = ""
+        end
+        return false
+    end
+
+    local previousEntries = self.entries
+    local previousSelectedName = self.selectedName
 
     self.entries = {}
     self.selectedName = nil
@@ -983,8 +1016,25 @@ function OutfitUI:RequestList(botName)
         end)
     end
 
-    if MultiBot.Comm and MultiBot.Comm.RequestOutfits and MultiBot.Comm.RequestOutfits(botName) then
-        return true
+    if bridgeOutfitCapable then
+        if MultiBot.Comm and MultiBot.Comm.RequestOutfits and MultiBot.Comm.RequestOutfits(botName) then
+            return true
+        end
+
+        bridgeState.lastError = "OUTFIT_SEND_FAILED"
+        self.requestToken = self.requestToken + 1
+        self.pendingBot = nil
+        if previousBotName == botName then
+            self.entries = previousEntries
+            self.selectedName = previousSelectedName
+        end
+        self:RenderEntryList()
+        self:RenderSelectedOutfit()
+        self:SetStatus(outfitL("send_failed"))
+        if waitButton and waitButton.waitFor == "OUTFITS" then
+            waitButton.waitFor = ""
+        end
+        return false
     end
 
     SendChatMessage("outfit ?", "WHISPER", nil, botName)
@@ -1054,7 +1104,42 @@ function OutfitUI:HandleBridgeEnd(botName, token)
     return true
 end
 
-function OutfitUI:HandleBridgeCommandResult(botName, token, result)
+local function showOutfitCommandFeedback(commandSuffix, wasCreate)
+    if type(commandSuffix) ~= "string" then
+        return
+    end
+
+    local cleaned = trim(commandSuffix)
+    local outfitName, action = string.match(cleaned, "^(.-)%s+(%S+)%s*$")
+    if not outfitName or outfitName == "" or not action then
+        return
+    end
+
+    action = string.lower(action)
+    local key = nil
+    if action == "equip" then
+        key = "feedback_equip"
+    elseif action == "replace" then
+        key = "feedback_replace"
+    elseif action == "update" then
+        key = wasCreate and "feedback_created" or "feedback_update"
+    elseif action == "reset" then
+        key = "feedback_reset"
+    end
+
+    if not key then
+        return
+    end
+
+    local message = string.format(outfitL(key), outfitName)
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage(message)
+    elseif type(print) == "function" then
+        print(message)
+    end
+end
+
+function OutfitUI:HandleBridgeCommandResult(botName, token, result, commandSuffix, wasCreate)
     if not botName or botName == "" then
         return false
     end
@@ -1066,6 +1151,7 @@ function OutfitUI:HandleBridgeCommandResult(botName, token, result)
     end
 
     self:SetStatus(outfitL("loaded"))
+    showOutfitCommandFeedback(commandSuffix, wasCreate == true)
 
     local refreshDelay = OUTFIT_UPDATE_REFRESH_DELAY
     if MultiBot.TimerAfter then
@@ -1110,7 +1196,7 @@ function MultiBot.HandleOutfitChatLine(tButton, line, botName)
     return false
 end
 
-function OutfitUI:RunCommand(commandSuffix, statusText, refreshDelay, persistDelay)
+function OutfitUI:RunCommand(commandSuffix, statusText, refreshDelay, persistDelay, persist, wasCreate)
     local botName = self.botName or (self.frame and self.frame.name) or nil
     if not botName or botName == "" then
         return false
@@ -1144,10 +1230,29 @@ function OutfitUI:RunCommand(commandSuffix, statusText, refreshDelay, persistDel
         return false
     end
 
-    if MultiBot.Comm and MultiBot.Comm.RunOutfitCommand and MultiBot.Comm.RunOutfitCommand(botName, commandSuffix, type(persistDelay) == "number" and persistDelay >= 0) then
-        self:BeginCommandLock(botName)
-        self:SetStatus(statusText)
-        return true
+    local bridgeState = MultiBot.bridge
+    local bridgeOutfitCapable = bridgeState
+        and bridgeState.connected == true
+        and bridgeState.outfitCapable == true
+
+    if bridgeOutfitCapable then
+        if MultiBot.Comm and MultiBot.Comm.RunOutfitCommand and MultiBot.Comm.RunOutfitCommand(botName, commandSuffix, persist == true, wasCreate == true) then
+            self:BeginCommandLock(botName)
+            self:SetStatus(statusText)
+            return true
+        end
+
+        bridgeState.lastError = "OUTFIT_SEND_FAILED"
+        self:SetStatus(outfitL("send_failed"))
+        return false
+    end
+
+    if MultiBot.allowLegacyChatFallback ~= true then
+        if bridgeState then
+            bridgeState.lastError = "OUTFIT_CAPABILITY_UNAVAILABLE"
+        end
+        self:SetStatus(outfitL("bridge_unavailable"))
+        return false
     end
 
     -- print("OutfitUI DEBUG: sending -> 'outfit " .. tostring(commandSuffix) .. "' to " .. tostring(botName))
@@ -1202,9 +1307,11 @@ function OutfitUI:CreateFromCurrent()
             return
         end
 
+        local wasCreate = self:FindEntry(outfitName) == nil
         self.selectedName = outfitName
         setLastSelected(self.botName or "", outfitName)
-        self:RunCommand(outfitName .. " update", outfitL("created"), 0.35, OUTFIT_PERSIST_FLUSH_DELAY)
+        local statusText = wasCreate and outfitL("created") or outfitL("updated")
+        self:RunCommand(outfitName .. " update", statusText, 0.35, OUTFIT_PERSIST_FLUSH_DELAY, true, wasCreate)
     end, "", anchorFrame)
 end
 
@@ -1257,7 +1364,7 @@ function OutfitUI:UpdateSelected()
     end
 
     setLastSelected(self.botName or "", selected.name)
-    self:RunCommand(selected.name .. " update", outfitL("updated"), OUTFIT_UPDATE_REFRESH_DELAY)
+    self:RunCommand(selected.name .. " update", outfitL("updated"), OUTFIT_UPDATE_REFRESH_DELAY, nil, true, false)
 end
 
 function OutfitUI:ResetSelected()
@@ -1266,7 +1373,7 @@ function OutfitUI:ResetSelected()
         return
     end
 
-    self:RunCommand(selected.name .. " reset", outfitL("reset_sent"), OUTFIT_RESET_REFRESH_DELAY)
+    self:RunCommand(selected.name .. " reset", outfitL("reset_sent"), OUTFIT_RESET_REFRESH_DELAY, nil, true, false)
 end
 
 function MultiBot.InitializeOutfitFrame()

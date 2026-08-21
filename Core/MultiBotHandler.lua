@@ -2222,18 +2222,7 @@ function MultiBot.HandleMultiBotEvent(event, ...)
 					return
 				end
 
-				if LegacyChatFallbackEnabled() then
-					tButton.waitFor = "INVENTORY"
-					if(MultiBot.TimerAfter) then
-						MultiBot.TimerAfter(0.45, function()
-							SendChatMessage("items", "WHISPER", nil, tButton.name)
-						end)
-					else
-						SendChatMessage("items", "WHISPER", nil, tButton.name)
-					end
-				else
-					tButton.waitFor = ""
-				end
+				tButton.waitFor = ""
 				return
 			end
 
@@ -2246,18 +2235,7 @@ function MultiBot.HandleMultiBotEvent(event, ...)
 					return
 				end
 
-				if LegacyChatFallbackEnabled() then
-					tButton.waitFor = "INVENTORY"
-					if(MultiBot.TimerAfter) then
-						MultiBot.TimerAfter(0.45, function()
-							SendChatMessage("items", "WHISPER", nil, tButton.name)
-						end)
-					else
-						SendChatMessage("items", "WHISPER", nil, tButton.name)
-					end
-				else
-					tButton.waitFor = ""
-				end
+				tButton.waitFor = ""
 				return
 			end
 
@@ -2300,12 +2278,7 @@ function MultiBot.HandleMultiBotEvent(event, ...)
 					return
 				end
 
-				if LegacyChatFallbackEnabled() then
-					tButton.waitFor = "INVENTORY"
-					SendChatMessage("items", "WHISPER", nil, tButton.name)
-				else
-					tButton.waitFor = ""
-				end
+				tButton.waitFor = ""
 				return
 			end
 		end
@@ -2318,21 +2291,11 @@ function MultiBot.HandleMultiBotEvent(event, ...)
 		local botName = inventory and inventory.name or ""
 
 		if inventory and inventory:IsVisible() and botName ~= "" then
-			local bridgeConnected = MultiBot.bridge and MultiBot.bridge.connected
-
 			if MultiBot.RequestInventoryPostActionRefresh
-				and MultiBot.RequestInventoryPostActionRefresh(botName, 0.45, 1.20, { noChatFallbackWhenBridgeConnected = true }) then
+				and MultiBot.RequestInventoryPostActionRefresh(botName, 0.45, 1.20) then
 				return
 			end
 
-			if bridgeConnected then
-				return
-			end
-
-			if MultiBot.RefreshInventory then
-				MultiBot.RefreshInventory(0.45)
-				return
-			end
 			return
 		end
 

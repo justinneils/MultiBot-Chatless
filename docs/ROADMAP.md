@@ -1,19 +1,29 @@
 # Multibot Chatless + Bridge — Roadmap de reprise
 
-Statut : roadmap active issue de l'audit initial v1c du 1er août 2026.  
-Dernière mise à jour : 08/08/2026 — validation runtime du lot Warlock chatless, diagnostic TEMP_ENCHANT et bascule Firestone/Spellstone bridge-only.
+Statut : roadmap active issue de l'audit initial v1c du 1er août 2026, resynchronisée avec l'état de stabilisation pré-merge du 17 août 2026.
+Dernière mise à jour : 17/08/2026 — le support multi-préfixes configurable, `INVENTORY_EXACT_V1`, l'UI inventaire bag-aware, `ITEM_MOVE_V1`, `ITEM_EQUIP_V1`, `ITEM_UNEQUIP_V1`, `ITEM_USE_V1`, `ITEM_DESTROY`, `ITEM_SELL_SINGLE_V1` et `VENDOR_BUYBACK_V1` sont validés sur la branche Jellypowered. La stabilisation pré-merge a clos les correctifs CAPS, postconditions ITEM_MOVE/ITEM_USE, autorisation INVENTORY_EXACT, fallback Equip, recyclage de la frame inventaire, sécurité cold-cache, localisation ITEM_USE/Inspect, garde nil Buyback et warning LuaLint `BUYBACK_ROWS`. Les lectures bulk Jellypowered restent différées et les vérifications globales LuaLint/CI restent à exécuter avant merge. Le prochain chantier de la roadmap normale reste l'ajout/retrait d'items précis dans les règles de loot.
 Cette roadmap est la source de vérité active du projet. Les anciens trackers et le fichier `TODO.md` ont été consolidés ici.
 
 ## Baseline auditée
 
+Audit de synchronisation : `audit-multibot-trade-inventory-whisper-spam-v1b-2026-08-15-004941`, complété par les patches runtime validés de suppression du dump Trade.
+
 - Addon : `L:\ChromieCraft_3.3.5a\Interface\AddOns\MultiBot`
+  - branche `main` ;
+  - HEAD et `origin/main` avant le correctif Trade local : `2c827f0acf305030d9d97ed797f9c798a25daab3` ;
+  - merge PR #63 : **Add chatless Enchanting Trade Service UI** ;
+  - correctif local validé en jeu : suppression du dump inventaire automatique lors des ouvertures Trade Inventory, Enchanting et client WoW natif.
 - Bridge : `L:\AC_PB\azerothcore-wotlk\modules\mod-multibot-bridge`
-- Playerbots : `L:\AC_PB\azerothcore-wotlk\modules\mod-playerbots` — lecture seule stricte
-- Addon : baseline post-PR #51 auditée, dépôt Git propre, branche `main`, commit `270911305acf3e806d389712a34a9433131db981`
-- AzerothCore : dépôt Git propre pour les modules bridge/Playerbots audités, branche `Playerbot`, commit `092e9ba6ff8dc6d861dddd1f31baa9d404381a85`
-- Bridge : 7 fichiers, logique principale concentrée dans `src/MultiBotBridge.cpp`
-- Communication actuelle : bridge-first pour les principaux rafraîchissements UI ; l'audit final du 07/08/2026 relève encore 159 lignes `SendChatMessage` à classifier, dont des reliquats `co/nc` directs dans des contrôles spécialisés.
-- Fallback automatique legacy désactivé par défaut : `MultiBot.allowLegacyChatFallback = false`.
+  - branche `main` ;
+  - HEAD et `origin/main` : `112428373dbd5741b55028e3efca299480a769bb` ;
+  - merge PR #27 : **Add ENCHANT_TRADE_V1 native enchanting trade service** ;
+  - aucun changement requis pour le correctif de spam Trade.
+- Playerbots : `L:\AC_PB\azerothcore-wotlk\modules\mod-playerbots`
+  - branche `master`, commit `a7b885d27134466dbc1c91d39b8241ea725a1bbb` ;
+  - **lecture seule stricte** ; invariant avant/après audit : `OK`.
+- AzerothCore : branche `Playerbot`, commit `092e9ba6ff8dc6d861dddd1f31baa9d404381a85`, worktree propre pendant l'audit.
+- Communication actuelle : bridge-first pour les principaux rafraîchissements UI et pour plusieurs actions d'écriture explicitement bornées ; des occurrences `SendChatMessage` subsistent et doivent être classées/migrées famille par famille.
+- Fallback automatique legacy désactivé par défaut : `MultiBot.allowLegacyChatFallback = false`. Certains chemins de compatibilité historiques restent toutefois explicitement documentés jusqu'à leur migration ou leur suppression validée.
 
 ## Règles de progression
 
@@ -25,56 +35,173 @@ Audit → Analyse → Proposition → Validation utilisateur → Patch minimal �
 - Rollback et hashes obligatoires.
 - Ne jamais ajouter d'exécuteur bridge générique acceptant une commande Playerbots arbitraire.
 
-## Contribution externe Jellypowered — AUDIT AUTORISÉ, INTÉGRATION NON COMMENCÉE
+## Contribution externe Jellypowered — RÉFÉRENCE CONSERVÉE, ATTRIBUTION OBLIGATOIRE
 
-Source reçue le 04/08/2026 :
+Deux sources Jellypowered sont conservées comme références de recherche. **Aucune ne doit être fusionnée directement dans `main`.**
+
+### Contribution initiale reçue le 04/08/2026
 
 - auteur : Jellypowered `<Jellypowered@gmail.com>` ;
-- commit 1 : `13059a9f334d1e5aaa8560ab29a1814e48b07054` ;
-- commit 2 : `7ff1347535be6d5a3256d933731c11c4b3f3b38e` ;
-- commit 3 : `04061f084bd189487f1ac0e99892316146f1bea0` ;
-- la PR est conservée comme source de recherche et ne doit pas être fusionnée directement dans `main`.
+- commits : `13059a9f334d1e5aaa8560ab29a1814e48b07054`, `7ff1347535be6d5a3256d933731c11c4b3f3b38e`, `04061f084bd189487f1ac0e99892316146f1bea0` ;
+- cette contribution reste une source historique à comparer avec l'état actuel.
 
-Décision validée :
+### Fork `Extended` audité le 15/08/2026 — REPRISE SÉLECTIVE PRIORITAIRE
 
-- auditer la contribution dans un environnement isolé ;
-- conserver les parties techniquement sûres et utiles ;
-- adapter ou réécrire les parties incompatibles avec notre bridge actuel ;
-- intégrer progressivement par patches à objectif unique ;
-- ne jamais modifier `mod-playerbots` ;
-- ne marquer aucune fonction comme intégrée avant vérification, compilation, tests en jeu et validation explicite de l'utilisateur.
+- fork : `Jellypowered/mod-multibot-bridge`, branche `Extended` ;
+- commit `89da6a9dd15be77c3cbfe9be88a9885b632d606a` — extension générale du bridge ;
+- commit `40bc0e378b1723d746d3425d4ee0818fd01531c6` — utilisation native d'item ;
+- commit `7f9027faf6126bd2854d9f5e84f9a7fa82549077` — resynchronisation partielle avec les fonctions upstream ;
+- audit : `audit-multibot-jellypowered-extended-v1-2026-08-15-025145.zip` ;
+- SHA-256 réel : `88a64500cb339fe8842d1f3b5a0553145d12f5eff34bbe9e30bd0fed04ed2d7b` ;
+- `mod-playerbots` est resté strictement en lecture seule.
 
-Fonctions candidates, toutes encore au statut `À AUDITER` :
+La branche `Extended` est divergente et ne doit pas être mergée en bloc. Chaque fonction suit obligatoirement cette matrice :
 
-1. helpers de parsing numérique strict et réponses structurées ;
-2. inventaire détaillé `INV_BAG`, `INV_ITEM_LOC`, `INV_EQUIP_LOC` ;
-3. lectures bulk inventaire et compétences ;
-4. équipement d'objet ;
-5. abandon et partage de quête ;
-6. lancement de sorts ;
-7. application de talents ;
-8. échange d'objets ;
-9. artisanat ciblé ;
-10. modifications des transferts banque, banque de guilde et vendeur.
+`Fonction Jellypowered`
+→ `Déjà présente chez nous ?`
+→ `Absente / partielle / différente ?`
+→ `Compatible avec notre sécurité ?`
+→ `Utile à la roadmap ?`
+→ `REPRENDRE / ADAPTER / REJETER`
 
-Crédits obligatoires :
+### Fonctions à ajouter ou adapter après audit sémantique ciblé
 
-- les audits et rapports conservent les trois hashes de commits, le nom et l'adresse de l'auteur ;
-- chaque PR intermédiaire indique précisément le code repris, adapté, réécrit ou rejeté ;
-- une reprise substantielle de code utilise, lorsque pertinent :
+1. **Support multi-préfixes addon configurables — TERMINÉ / VALIDÉ**
+   - audit ciblé initial : `audit-multibot-multiprefix-v1c-2026-08-15-133152.zip` ;
+   - `MBOT` reste le préfixe MultiBot par défaut ; l'Addon peut utiliser les préfixes configurés et le Bridge applique une whitelist stricte et bornée ;
+   - le Bridge répond sur le même préfixe que la requête reçue et n'accepte aucun préfixe arbitraire ;
+   - le budget des messages addon reste borné à 255 octets et a été revalidé pendant la stabilisation CAPS.
+
+2. **Inventaire à emplacements exacts, UI bag-aware et déplacement natif — TERMINÉ / VALIDÉ EN JEU**
+   - audits ciblés de conception terminés :
+     - `audit-multibot-inventory-exact-locations-v1-2026-08-15-135528.zip` ;
+     - `audit-multibot-inventory-bag-ui-v1-2026-08-15-142637.zip` ;
+   - `INVENTORY_EXACT_V1` est implémenté comme fondation complémentaire à l'`INVENTORY_V1` historique : le chemin legacy `INV_BEGIN` / `INV_ITEM` reste conservé pour les fonctions déjà validées ;
+   - le Bridge expose la topologie réelle des conteneurs avec `INV_BAG` et les piles physiques avec `INV_ITEM_LOC`, en utilisant les coordonnées AzerothCore réelles comme référence canonique ;
+   - les coordonnées et métadonnées permettent de distinguer sans ambiguïté Backpack, sacs équipés, Keyring et piles identiques situées dans des emplacements physiques différents ;
+   - `INV_EQUIP_LOC` n'a pas été nécessaire pour la V1 `ITEM_EQUIP_V1` validée et reste différé jusqu'à l'apparition d'un consommateur réel ;
+   - `INVENTORY_BULK_SELL_V1` et `INVENTORY_OPEN_V1` restent préservés ;
+   - les données exactes ne sont jamais une autorisation : joueur, contrôle du bot, session/map, coordonnées, item, quantité et état runtime restent revalidés côté Bridge.
+
+   **UI bag-aware réalisée et validée :**
+   - taille générale de la fenêtre conservée ; zone grille/scroll réduite pour réserver la barre basse ;
+   - barre basse : **Backpack + Sac 1 + Sac 2 + Sac 3 + Sac 4 + Keyring** ;
+   - aucune sélection = vue globale ; clic sur un conteneur = filtre local ; second clic sur le même conteneur = retour à la vue globale ;
+   - changement de bot = retour à la vue globale ; rafraîchissement du même bot = filtre conservable ;
+   - les emplacements vides sont dessinés et les items sont placés dans leurs coordonnées physiques réelles ;
+   - les quatre sacs équipés utilisent leurs vraies icônes ; un emplacement de sac absent reste visible mais désactivé ;
+   - Backpack utilise la texture client 3.3.5a validée ; Keyring utilise une icône verticale étroite `13x28` sans cadre carré, avec une zone cliquable `32x32` ;
+   - les tooltips Backpack / Sac 1..4 / Keyring sont couverts dans les 8 locales Addon auditées ;
+   - tests en jeu validés : `/reload`, rendu initial, slots vides, vue globale, filtres Backpack/Sac 1/Sac 2/Sac 3/Sac 4/Keyring, retour à Tous, traductions FR et rendu final Keyring ;
+   - le trafic exact reste lié au consommateur UI : l'Addon conserve le chemin legacy puis demande le snapshot exact pour la fenêtre d'inventaire ; aucun polling global n'est introduit.
+
+   **`ITEM_MOVE_V1` réalisé et validé :**
+   - endpoint spécialisé `RUN~ITEM_MOVE` pour déplacer une pile entière entre slots physiques autorisés ; le split-stack reste explicitement hors scope ;
+   - drag/drop synthétique côté Addon avec `RegisterForDrag("LeftButton")`, résolution de la destination via `GetMouseFocus()` / `__mbExactSlot`, sans `PickupContainerItem`, `PickupInventoryItem`, `GetCursorInfo` ni `ClearCursor` ;
+   - aucune mutation optimiste de l'UI : le résultat structuré `INVENTORY_ITEM_MOVE` déclenche un nouveau snapshot exact ;
+   - le Bridge revalide bot contrôlable, sessions/monde, source/destination, `itemId`, quantité et positions autorisées Backpack / sacs équipés / Keyring ;
+   - protection serveur : **8 requêtes / 2 s / requester**, TTL anti-rejeu **10 s**, **32** tokens récents maximum par requester, état requester borné à **512**, quantité bornée à **1000** ;
+   - exécution native par **un seul `Player::SwapItem`**, puis relecture autoritative de la source et de la destination ; succès uniquement si l'état réel a changé ;
+   - aucun `SplitItem`, `HandleCommand`, `DoSpecificAction`, exécuteur Playerbots générique ni dépendance chat/whisper sur le chemin `ITEM_MOVE_V1` ;
+   - tests en jeu validés : drag/drop même conteneur et inter-conteneurs, rafraîchissement exact après résultat, absence de spam chat et absence de régression constatée ;
+   - UI finale validée : groupes visuels par conteneur en vue globale, titres repositionnés, nom jaune redondant supprimé, panneau actions gauche **120 px**, espacement des actions **36/38**, grille inventaire conservée à **8 colonnes** ;
+   - audit final : `audit-multibot-item-move-final-v1b-2026-08-15-195912.zip` — `FINAL_STATUS=OK`, `FAILURE_COUNT=0`, `WARNING_COUNT=0` ;
+   - attribution Jellypowered à conserver pour les parties réellement reprises ou substantiellement adaptées depuis `Extended`.
+
+3. **Lectures bulk — AUDITÉ / NON INTÉGRÉ**
+   - audit ciblé : `audit-multibot-jellypowered-bulk-reads-v1-2026-08-15-205840.zip` — `FINAL_STATUS=OK`, `FAILURE_COUNT=0`, `WARNING_COUNT=0` ;
+   - `GET~INVENTORY_BULK` : **rejeter/différer dans sa forme Extended** ;
+     - il recouvre partiellement les données déjà fournies par `INVENTORY_EXACT_V1`, qui reste la source autoritative pour la topologie physique Backpack / sacs / Keyring et pour `ITEM_MOVE_V1` ;
+     - Extended réutilise `INV_BAG` et `INV_ITEM_LOC` avec des schémas incompatibles avec ceux déjà validés dans notre protocole exact ;
+     - aucun consommateur Addon actuel ne nécessite une snapshot d'inventaire multi-bot ;
+     - la boucle sur tous les bots visibles n'est pas explicitement bornée et peut amplifier fortement le trafic addon et les logs ;
+     - aucun framing générique, comptage de complétude, pagination, ACK ou rate-limit dédié n'est fourni par Extended pour cette famille ;
+   - `GET~BOT_SKILLS_BULK` : **différer jusqu'à l'apparition d'un consommateur multi-bot réel** ;
+     - `GET~BOT_SKILLS` unitaire et `BuildBotSkillEntries` couvrent déjà le besoin actuel de Character Info ;
+     - le format Extended inverse `skillId` et `category` par rapport au schéma `BOT_SKILLS_ITEM` déjà utilisé ;
+     - toute reprise future devra conserver le schéma unitaire existant et ajouter des limites explicites de bots/entrées/octets, rate-limit, token/timeout et contrôle de complétude ;
+   - aucun besoin de modifier `mod-playerbots` et aucun exécuteur générique/chat Playerbots n'est requis pour ces lectures ;
+   - décision : **aucun patch C++/Lua pour ce point** ; le chantier est clos par documentation uniquement.
+
+4. **Équipement et déséquipement natifs d'un item précis — TERMINÉ / VALIDÉ EN JEU**
+   - `ITEM_EQUIP_V1` utilise l'endpoint spécialisé `RUN~ITEM_EQUIP~bot~token~srcBag~srcSlot~srcItemId~srcCount` et le résultat structuré `INVENTORY_ITEM_EQUIP` ;
+   - la source est limitée au Backpack et aux sacs équipés, avec identité exacte `bag/slot/itemId/count`, revalidation serveur du bot, des droits, sessions, état runtime et source avant exécution ;
+   - l'exécution passe par l'auto-équipement natif AzerothCore ; aucun `HandleCommand`, `DoSpecificAction`, exécuteur Playerbots générique ni mutation optimiste Addon n'est utilisé ;
+   - le résultat autoritatif déclenche le rafraîchissement de l'inventaire et les tests en jeu ont validé Backpack, sacs 1..4, remplacement d'un slot occupé, interactions 2H/offhand, double-clic rapide, refus d'un objet non équipable et absence de whisper/chat parasite ;
+   - `ITEM_UNEQUIP_V1` utilise l'endpoint spécialisé `RUN~ITEM_UNEQUIP~bot~token~srcSlot~srcItemId` et le résultat structuré `INVENTORY_ITEM_UNEQUIP` ;
+   - le clic droit Inspect convertit le slot client `1..19` en slot Core `0..18`, puis le Bridge revalide le slot équipé et l'`itemId`, capture le GUID et utilise la voie native `CMSG_AUTOSTORE_BAG_ITEM` vers l'inventaire ;
+   - le succès n'est annoncé que si le même GUID est retrouvé hors équipement dans un emplacement physique autorisé Backpack/Sac 1..4 ; aucun appel à `UnequipAction` Playerbots n'est utilisé ;
+   - protections `ITEM_UNEQUIP_V1` : **8 requêtes / 2 s / requester**, TTL anti-rejeu **10 s**, **32** tokens récents maximum par requester et état requester borné à **512** ;
+   - le fallback legacy `ue` n'est possible que lorsque `MultiBot.allowLegacyChatFallback == true`; avec la configuration bridge-first normale (`false`), aucun whisper automatique n'est émis ;
+   - tests en jeu validés : slot simple, main hand, 2H/offhand, inventaire plein, double clic rapide, aucune perte/duplication, rafraîchissement cohérent et zéro chat parasite.
+
+5. **Utilisation native d'un item précis — PROCHAIN CHANTIER JELLYPOWERED / À AUDITER-ADAPTER**
+   - endpoint spécialisé `ITEM_USE` ;
+   - item exact, usage explicitement supporté, cooldown/cast/mouvement/état revalidés ;
+   - ne pas considérer l'action réussie avant validation du résultat réel.
+
+6. **Déplacement/rééquipement de sacs — À ADAPTER, priorité faible**
+   - `BAG_MOVE` Extended déplace un sac entre emplacements de sacs équipés ;
+   - ne pas le présenter comme un déplacement arbitraire de tout item.
+
+7. **Échange d'un item précis — À ADAPTER**
+   - étudier `ITEM_TRADE` avec quantité et emplacement exact ;
+   - revalider partenaire, distance, Trade actif, propriété et contrôle du bot.
+
+8. **Abandon et partage de quête — À ADAPTER**
+   - endpoints `QUEST_ABANDON` et `QUEST_SHARE` ;
+   - valider présence de la quête, partageabilité, groupe, cible et état du bot.
+
+9. **Application/reset de talents — À ADAPTER AVEC PRUDENCE**
+   - endpoint `TALENT_APPLY` ;
+   - valider build, niveau, points, coûts/reset, combat, double spécialisation et effets runtime ;
+   - vérifier les API Playerbots/AzerothCore dans le dépôt local avant toute reprise.
+
+10. **Artisanat ciblé — À ADAPTER**
+    - étudier `CRAFT_RECIPE_TARGET` ;
+    - revalider profession, recette, matériaux, outils, cible exacte, compatibilité et état Trade.
+
+11. **Banque / banque de guilde / vendeur — COMPARER PUIS ADAPTER**
+    - ces familles existent déjà dans notre Bridge ;
+    - ne reprendre que les améliorations démontrables : emplacement exact, quantités, droits, proximité, validation ;
+    - ne considérer aucun endpoint vendeur supplémentaire comme acquis sans preuve dans le code.
+
+12. **Comptage d'inventaire / restauration de sélection — COMPARER PUIS ADAPTER**
+    - ne reprendre que les corrections démontrées par audit comparatif.
+
+### Fonctions et modèles explicitement rejetés
+
+- **`RUN~CAST_SPELL` générique : REJETER.**
+  - un `spellId` arbitraire avec cible élargit trop la surface d'action ;
+  - préférer des endpoints spécialisés et bornés comme `ENCHANT_TRADE_V1`.
+
+- **Tout exécuteur Bridge générique de commande Playerbots ou de texte libre : REJETER.**
+  - aucun nouvel endpoint ne doit transmettre une commande Playerbots arbitraire ;
+  - les helpers de type `HandleCommand()` ne sont pas un modèle pour les nouvelles fonctions.
+
+- **Toute logique contournant les validations serveur : REJETER.**
+  - permissions, contrôle du bot, session/map/Trade, longueurs, nombres, emplacements, quantités, rate limiting, erreurs structurées et timeouts restent obligatoires.
+
+- **Toute modification de `mod-playerbots` : INTERDITE.**
+
+### Règle d'intégration Extended
+
+Audit ciblé → Analyse comparative → classification `REPRENDRE` ou `ADAPTER` → validation utilisateur → patch minimal → vérifications → compilation si C++ → tests en jeu → audit final → archivage.
+
+Aucune fonction Extended ne doit être marquée comme intégrée avant validation runtime.
+
+### Attribution obligatoire
+
+- conserver le nom de Jellypowered et les hashes des commits réellement étudiés ;
+- chaque PR précise ce qui est repris, adapté, réécrit ou rejeté ;
+- reprise substantielle, lorsque pertinent :
   `Co-authored-by: Jellypowered <Jellypowered@gmail.com>` ;
-- une réécriture seulement inspirée mentionne :
+- réécriture seulement inspirée :
   `Design inspired by the Jellypowered bridge contribution.` ;
-- les crédits sont préparés pour la PR uniquement après validation des tests en jeu de la partie concernée ;
-- aucune attribution ne doit suggérer qu'une fonction non testée ou non intégrée est déjà livrée.
+- les crédits sont ajoutés uniquement pour les parties réellement intégrées et validées.
 
-Politique de tests :
+Statut : **audit Extended validé ; reprise sélective prioritaire avant la roadmap normale ; merge direct du fork interdit.** Le travail Jellypowered courant est isolé sur `feature/jellypowered-chatless-integration` dans l'Addon et le Bridge ; les commits validés y sont accumulés et aucune PR/merge vers `main` ne doit être lancée avant demande explicite de l'utilisateur.
 
-- les tests ciblés restent obligatoires après chaque patch ;
-- les tests exhaustifs transversaux de toutes les fonctions pourront être exécutés vers la fin du projet ;
-- ce report des tests exhaustifs ne permet pas de déclarer une fonction validée avant ses propres tests ciblés.
-
-Statut de reprise : contribution conservée pour un audit/intégration ultérieurs. La prochaine étape immédiate du projet est la migration des reliquats UI `co/nc` encore directs, puis la clôture de la matrice runtime finale STATE/stratégies. L'audit Jellypowered reprendra ensuite selon l'ordre validé.
 
 ## Phase 0 — Assainissement documentaire — TERMINÉE
 
@@ -170,41 +297,58 @@ Preuve d'audit final statique :
 
 Reste à terminer avant de fermer définitivement ce bloc :
 
-- le lot Warlock Stones/Soulstones/Pets/Curses est validé au 08/08/2026 et ne fait plus partie des reliquats `co/nc` prioritaires ;
+- le lot Warlock Stones/Soulstones/Pets/Curses est validé pour sa migration chatless et ne fait plus partie des reliquats `co/nc` prioritaires ;
+- le comportement sans fallback silencieux des mutations stratégies a été durci et mergé après cette baseline intermédiaire ;
 - exécuter/consolider la matrice runtime finale : zéro/un/plusieurs bots, listes longues, fragment manquant/dupliqué/désordonné, réponse tardive, timeouts, déconnexion en cours de transaction, mutations valides/invalides, bot absent, plusieurs bots, smoke test toutes classes, zéro erreur Lua, contrôle chat et logs ;
 - classifier puis migrer les autres familles legacy réellement automatiques avant de déclarer le projet entièrement chatless.
 
-## Validation livrée — Sélecteurs Warlock chatless + Stones — VALIDÉE LE 08/08/2026
+## Validation livrée — Sélecteurs Warlock chatless + Stones — MIGRATION CHATLESS VALIDÉE, RELIQUATS SUSPENDUS
 
-Périmètre addon validé :
+Périmètre validé et mergé :
 
-- les sélecteurs Warlock Stones, Soulstones, Pets et Curses ne contiennent plus de `SendChatMessage` direct pour leurs mutations `co/nc` ; ils passent par `MultiBot.ActionToTarget()` puis `STRATEGY_MUTATION_V1` / `RUN~STRATEGY` lorsque le bridge est disponible ;
-- `MultiBot.ActionToTarget()` distingue désormais le transport `bridge` du fallback `chat` ; avec le bridge, les sélecteurs n'appliquent plus d'état local optimiste et attendent l'état serveur autoritatif ; le fallback chat conserve son comportement immédiat de compatibilité ;
-- les contrôles Warlock invalides `dps` et `dps debuff` ont été retirés, le placeholder Buff désactivé a été supprimé et le layout des contrôles a été compacté ;
-- les quatre avertissements LuaLint ciblés sur les variables `action` ont été corrigés sans modifier le comportement.
+- les sélecteurs Warlock Stones, Soulstones, Pets et Curses utilisent le transport structuré `STRATEGY_MUTATION_V1` / `RUN~STRATEGY` lorsque le bridge est disponible ;
+- le chemin bridge attend l'état serveur autoritatif au lieu de valider localement une mutation avant l'ACK ;
+- les contrôles Warlock invalides `dps` et `dps debuff` ainsi que le placeholder Buff désactivé ont été retirés et le layout a été compacté ;
+- le bridge contient le mécanisme de bascule Firestone/Spellstone et l'endpoint diagnostique à la demande `GET~WEAPON_ENCHANT` / `WEAPON_ENCHANT` ;
+- aucun fichier de `mod-playerbots` n'est modifié.
 
-Diagnostic TEMP_ENCHANT validé :
+Décision de roadmap au 14/08/2026 :
 
-- `/mbdebug enchant [bot]` envoie à la demande `GET~WEAPON_ENCHANT` et affiche la réponse structurée `WEAPON_ENCHANT` ;
-- le bridge lit l'item, l'ID de `TEMP_ENCHANTMENT_SLOT` et sa durée sur main-hand/off-hand ;
-- l'endpoint est limité au bot visible et contrôlable, conserve `CheckLevelFor(...)`, et applique un rate-limit de 500 ms par requester ;
-- aucun polling automatique n'est introduit et `mod-playerbots` n'est pas modifié.
+- la **vérification réelle finale du `TEMP_ENCHANTMENT_SLOT` Firestone/Spellstone** reste un chantier suspendu à reprendre seulement à la fin de la roadmap normale ;
+- les **quatre warnings LuaLint restants dans `Strategies/MultiBotWarlock.lua`** restent également suspendus ;
+- ces reliquats ne doivent pas interrompre le chantier suivant de la Phase 5.
 
-Cause et correction Firestone/Spellstone :
+## Synchronisation post-merge — État livré au 14/08/2026
 
-- l'audit Playerbots en lecture seule a confirmé que `ItemForSpellValue` et `UseItemAction::UseItem()` refusent de cibler une arme dont `TEMP_ENCHANTMENT_SLOT` est déjà occupé ; la stratégie peut donc changer sans remplacer la pierre déjà appliquée ;
-- le correctif reste dans `mod-multibot-bridge` : uniquement pour un Warlock, en `BOT_STATE_NON_COMBAT`, lors d'un vrai switch exclusif `firestone` ↔ `spellstone` ;
-- le bridge découvre dynamiquement les enchant IDs des Firestone/Spellstone portées par le bot, refuse d'effacer un enchantement temporaire non reconnu, retire proprement l'ancien enchantement reconnu, puis réutilise l'action Playerbots existante avec `DoSpecificAction()` ;
-- aucun ID Firestone/Spellstone n'est hardcodé dans le correctif et aucun fichier de `mod-playerbots` n'est modifié.
+Les jalons suivants, postérieurs à la mise à jour du 08/08, sont présents dans les branches `main` auditées :
 
-Preuves runtime :
+- mutations stratégies : suppression du fallback chat silencieux lorsque le chemin structuré est requis ;
+- Outfits : transport bridge-first et négociation `OUTFIT_V1` ;
+- inventaire : lecture/rafraîchissement natifs via `INVENTORY_V1` ;
+- banque, banque de guilde et achat vendeur : durcissements serveur des actions `ITEM_ACTION` ;
+- vente inventaire `SELL_VENDOR` : bridge-first lorsque `INVENTORY_BULK_SELL_V1` est négocié ; le fallback legacy de compatibilité demeure hors chemin normal ;
+- `OPEN_ITEMS` : bridge-first via `INVENTORY_OPEN_V1`, avec traitement résiduel borné côté serveur ;
+- `GROUP ROLL` : bridge-first via `GROUP_ROLL_V1`, avec mode normal et mode item, filtrage aux bots visibles/contrôlables du groupe, rate-limit serveur et ACK structuré.
 
-- compilation Visual Studio `RelWithDebInfo x64` : 3 projets réussis, 0 échec ; worldserver démarré sans erreur bridge ;
-- Apha, Spellstone → Firestone : `TEMP_ENCHANTMENT_SLOT` `3620` → `3614`, durée finale `3600000 ms`, utilisation réelle de Grand Firestone observée ;
-- Apha, Firestone → Spellstone : `TEMP_ENCHANTMENT_SLOT` `3614` → `3620`, durée finale `3600000 ms`, utilisation réelle de Grand Spellstone observée ;
-- audit final : `audit-multibot-warlock-stone-force-switch-final-v1-2026-08-08-160400-2026-08-08-160706.zip`, SHA-256 `C0025FCAC7817711B0D5493EA3349B5F57A3AA620C260E76F59E1CAA92F7EA1A` ;
-- archivage patch : `patch-multibot-warlock-stone-force-switch-v1b-2026-08-08-154300-results-2026-08-08-162451.zip`, SHA-256 `8FABF24B50EA459EF6C7EE4A0D0BE21CFB251D1C7DEF6505C7C483BF43141C5B` ;
-- `mod-playerbots` reste strictement en lecture seule.
+Jalons de merge principaux :
+
+- Addon PR #58 — **Migrate inventory Sell Vendor to the bridge** ;
+- Bridge PR #24 — **Add safe bridge-first SELL_VENDOR inventory action** ;
+- Addon PR #60 — **Add bridge-first OPEN_ITEMS inventory action** ;
+- Bridge PR #25 — **Add residual auto-safe OPEN_ITEMS handling** ;
+- Addon PR #61 — **Add chatless group Roll UI** — merge `106074c3c93f80812f73af27e746860c7c8a4dcf` ;
+- Bridge PR #26 — **Add chatless group Roll support** — merge `210bd1f4f6597fe4f0691ec729ec4904ebe2d463`.
+
+Validation `GROUP ROLL` :
+
+- roll normal 0–100 : OK ;
+- roll avec objet par Shift+clic : OK ;
+- seuls les bots éligibles au contexte Playerbots invoqué participent au roll item ;
+- aucun whisper/chat parasite sur le workflow ;
+- protection contre double envoi et refus d'un item vide/invalide ;
+- pending nettoyé sur déconnexion/changement de monde ;
+- UI finale validée : `240x245`, fond opaque style inventaire, padding horizontal `10 px`, padding vertical haut `10 px` ;
+- compilation Bridge déjà validée sans erreur.
 
 ## Phase 1 — Baseline de compilation et tests de non-régression
 
@@ -291,22 +435,58 @@ Avant chaque migration, classer l'occurrence `SendChatMessage` comme :
 - mécanisme UI à migrer ;
 - code mort à supprimer.
 
-Ordre recommandé :
+Ordre recommandé et état réel :
 
-1. **Formations — application par clic gauche : VALIDÉE** via `RUN~FORMATION~GROUP` par `patch-multibot-formation-chatless-v1c-2026-08-01-181300`.
-2. **Consultation de la formation actuelle par clic droit : VALIDÉE** via `GET~FORMATIONS~GROUP`, `FORMATIONS_BEGIN/ITEM/END` et un tooltip local traduit.
-3. **Infrastructure mutations stratégies `co/nc` : VALIDÉE STATIQUEMENT** via `STRATEGY_MUTATION_V1`, `RUN~STRATEGY`, `STRATEGY_ACK`, timeouts, limites et diagnostics explicites.
-4. **Sélecteurs Warlock Stones/Soulstones/Pets/Curses : VALIDÉS** — mutations via `STRATEGY_MUTATION_V1` / `RUN~STRATEGY`, état UI autoritatif côté bridge et bascule réelle Firestone/Spellstone validée sans modification de Playerbots.
-5. `s *` — vente générale bridge-first.
-6. `s vendor` — vente vendeur bridge-first, sans whisper item par item.
-7. `open items` — ouverture de conteneurs bridge-first.
-8. `roll` et `roll [item]`.
-9. Enchantement d'objet, après validation du flux trade/cast disponible sans modification de Playerbots.
-10. Ajout/retrait d'items précis dans les règles de loot.
-11. Décision sur `Quest`/`Skill` versus `Disenchant`, sans inventer de stratégie absente de Playerbots.
-12. Ordres collectifs `follow`, `attack`, `stay` seulement après validation manuelle exacte des sélecteurs Playerbots ; ne pas réintroduire `RUN~ORDER` générique.
+1. **Formations — application par clic gauche : TERMINÉ / VALIDÉ** via `RUN~FORMATION~GROUP`.
+2. **Consultation de la formation actuelle par clic droit : TERMINÉ / VALIDÉ** via `GET~FORMATIONS~GROUP`, `FORMATIONS_BEGIN/ITEM/END` et tooltip local traduit.
+3. **Infrastructure mutations stratégies `co/nc` : TERMINÉE pour les chemins migrés** via `STRATEGY_MUTATION_V1`, `RUN~STRATEGY`, `STRATEGY_ACK`, timeouts, limites et diagnostics explicites.
+4. **Sélecteurs Warlock Stones/Soulstones/Pets/Curses : TERMINÉS pour la migration chatless validée**. Les reliquats TEMP_ENCHANT réel et LuaLint sont suspendus et ne bloquent pas la roadmap normale.
+5. **`s *` / `SELL_GREY` : SUSPENDU** — le chemin actuel existe, mais le chantier `SELL_GREY / sell-grey core API / bridge-first` est explicitement reporté à la fin de la roadmap.
+6. **`s vendor` / `SELL_VENDOR` : TERMINÉ pour le chemin bridge-first inventaire** — `INVENTORY_BULK_SELL_V1`, validation serveur et résultat structuré ; fallback legacy de compatibilité conservé si la capacité n'est pas disponible.
+7. **`open items` / `OPEN_ITEMS` : TERMINÉ / VALIDÉ / MERGÉ** — `INVENTORY_OPEN_V1`, Addon PR #60, Bridge PR #25.
+8. **`roll` et `roll [item]` : TERMINÉ / VALIDÉ / MERGÉ** — `GROUP_ROLL_V1`, Addon PR #61, Bridge PR #26.
+9. **Enchantement d'objet : TERMINÉ / VALIDÉ EN JEU / MERGÉ — Addon #63 / Bridge #27** — `ENCHANT_TRADE_V1`, UI dédiée aux enchanteurs, liste des enchantements réellement connus, composants/outils, Trade WoW natif via le slot « ne sera pas échangé », exécution par ID de sort numérique validé côté bridge, sans exécuteur générique de cast/chat ; layout 440 px et i18n des 8 locales validés.
+10. **Spam inventaire automatique à l'ouverture Trade : TERMINÉ / VALIDÉ EN JEU — PR ADDON #64 EN COURS** — réutilisation puis généralisation du filtre addon existant : détection du header exact `=== Inventory ===` pour un bot connu, suppression du dump lors des chemins Inventory → Trade, Enchanting → Trade et du menu natif WoW « Échanger », sans modification de Playerbots ni du Bridge.
+11. **PROCHAIN CHANTIER NORMAL — Ajout/retrait d'items précis dans les règles de loot.**
+12. **À FAIRE — Décision sur `Quest`/`Skill` versus `Disenchant`**, sans inventer de stratégie absente de Playerbots.
+13. **À FAIRE — Ordres collectifs `follow`, `attack`, `stay`**, seulement après validation manuelle exacte des sélecteurs Playerbots ; ne pas réintroduire `RUN~ORDER` générique.
 
 Les commandes informatives `who`, `co ?`, `nc ?` et `ss ?` restent manuelles tant qu'aucune UI structurée ne les remplace. Les mutations UI automatiques `co/nc`, en revanche, doivent passer par le bridge dès qu'un contrat structuré validé existe.
+
+### Validation Enchanting Trade Service — 14/08/2026
+
+- audit Trade/Cast et interfaces Playerbots réalisé en lecture seule ;
+- capacité négociée `ENCHANT_TRADE_V1` ;
+- `GET~ENCHANT_TRADE` liste uniquement les sorts d'Enchanting connus et valides du bot avec disponibilité des composants/outils ;
+- `RUN~ENCHANT_TRADE` accepte uniquement un bot contrôlable, un token et un ID de sort numérique ; aucun GUID d'objet arbitraire, texte de commande ou exécuteur Playerbots générique n'est exposé ;
+- cible réelle via le Trade WoW natif et `TRADE_SLOT_NONTRADED`, avec revalidation Core au cast puis à l'acceptation finale du Trade ;
+- rate-limit bridge : 4 requêtes par fenêtre de 2 secondes ;
+- UI dédiée visible uniquement pour les bots enchanteurs, accessible depuis l'EveryBar et Character Info ;
+- fenêtre réduite à 440 px, champ de recherche corrigé et textes Enchant Trade localisés dans les 8 locales runtime ;
+- test en jeu : ouverture, liste, recherche, tooltips, Trade et enchantement réel **OK** ;
+- spam chat automatique lié au service Enchanting : **aucun après correctif Trade validé le 15/08/2026** ;
+- l'ouverture du Trade par l'UI Enchanting réutilise le filtre de dump inventaire déjà employé par Inventory → Trade.
+
+### Validation suppression du dump Inventory à l'ouverture Trade — 15/08/2026
+
+- cause auditée dans Playerbots en lecture seule : `TradeStatusAction::BeginTrade()` envoie automatiquement `=== Inventory ===` puis le contenu de l'inventaire au maître lors du démarrage d'un échange ;
+- `mod-playerbots` reste strictement inchangé ;
+- le filtre addon existant du bouton Inventory → Trade a d'abord été exporté puis réutilisé par les deux appels `InitiateTrade()` de l'UI Enchanting ;
+- le filtre a ensuite été généralisé côté addon pour reconnaître automatiquement le header exact `=== Inventory ===` provenant d'un bot connu uniquement lorsqu'une fenêtre Trade est ouverte, ce qui couvre aussi le menu contextuel natif WoW « Échanger » sans masquer la sortie manuelle `item count` hors Trade ;
+- le matching large sur le simple mot `Inventory` a été retiré afin d'éviter de masquer un whisper normal ;
+- tests en jeu : Inventory → Trade silencieux, Enchanting → Trade silencieux, menu natif WoW « Échanger » silencieux ;
+- enchantement réel et workflow Trade conservés ;
+- aucune régression observée par l'utilisateur ;
+- Bridge inchangé, Playerbots inchangé, aucun rebuild worldserver requis.
+
+### Chantiers suspendus — à reprendre seulement après la roadmap normale
+
+- `SELL_GREY` / sell-grey core API / bridge-first ;
+- vérification réelle finale Firestone/Spellstone `TEMP_ENCHANTMENT_SLOT` ;
+- quatre warnings LuaLint restants dans `Strategies/MultiBotWarlock.lua` ;
+- autres petits reliquats explicitement reportés lors des étapes précédentes.
+
+Ces sujets restent enregistrés mais **ne doivent pas modifier l'ordre du prochain chantier**.
 
 Critère de sortie : chaque famille migrée fonctionne bridge-first et ne génère plus de réponse chat automatique.
 
@@ -334,3 +514,71 @@ Ces fonctions doivent rester séparées des patches de correction et de sécurit
 - Création d'un checkpoint et d'une archive ZIP avec manifeste SHA-256 et rollback vérifié.
 
 Critère de sortie : version stabilisée, documentée et reproductible du projet Multibot Chatless + Bridge.
+
+<!-- MULTIBOT_JELLYPOWERED_PROGRESS_SYNC_2026-08-17 -->
+<!-- NORMAL_ROADMAP_NEXT=LOOT_RULE_EXACT_ITEM_ADD_REMOVE -->
+
+## État consolidé Jellypowered / inventaire — 17/08/2026
+
+> **Référence de progression actuelle.** Ce bloc supplante les anciens libellés « prochain chantier Jellypowered » conservés plus haut à titre historique. Il ne modifie pas l'ordre de la roadmap normale après clôture du lot Jellypowered.
+
+### Intégré, vérifié et validé
+
+- **Support multi-préfixes addon configurable** : `MBOT` reste le préfixe MultiBot par défaut ; le Bridge utilise une whitelist configurée et répond sur le même préfixe que la requête reçue ; aucun préfixe arbitraire n'est accepté.
+- **Inventaire exact / bag-aware** : `INVENTORY_EXACT_V1`, identité exacte `itemId + bag + slot`, vue globale sans sac sélectionné, Backpack + 4 sacs équipés + Keyring ; l'icône Keyring reste étroite et sans cadre carré spécifique.
+- **Déplacement exact d'item** : `ITEM_MOVE_V1`, source/destination revalidées côté serveur, pas de mutation optimiste côté Addon, rafraîchissement autoritatif après résultat Bridge.
+- **UX drag & drop de `ITEM_MOVE_V1`** : source atténuée pendant le drag, fantôme 32x32 suivant le curseur, `EnableMouse(false)`, détection `GetMouseFocus()` préservée, aucune API native de curseur détournée. Test en jeu validé le 16/08/2026 ; audit final `audit-multibot-item-move-drag-ghost-final-v1-2026-08-16-183942.zip`, SHA-256 `2f149a2cae53fd839fb077c4e2e1298e389038af4737f061eac5e594d05d1c3a`.
+- **Équipement exact** : `ITEM_EQUIP_V1` validé.
+- **Déséquipement exact** : `ITEM_UNEQUIP_V1` validé.
+- **Utilisation native d'un item exact** : `ITEM_USE_V1` validé via endpoint spécialisé et chemin natif `HandleUseItemOpcode`, avec revalidation de la source et résultat serveur autoritatif.
+- **Destruction d'un item exact** : `ITEM_DESTROY` validé via endpoint spécialisé.
+- **Vente unitaire exacte** : `ITEM_SELL_SINGLE_V1` validé avec source exacte, vendeur proche revalidé, protections des objets non vendables/protégés, rate limit/replay et absence de mutation optimiste.
+- **Rachat vendeur** : `VENDOR_BUYBACK_V1` validé avec liste structurée, vendeur proche revalidé, exécution via le handler natif de Buyback et rafraîchissements autoritatifs de l'inventaire et de la liste de rachat.
+
+Toutes ces intégrations conservent `mod-playerbots` en **lecture seule stricte** et n'introduisent aucun exécuteur générique de commande Playerbots.
+
+### Stabilisation pré-merge — 17/08/2026
+
+- CAPS : fragmentation/budget wire bornés et corrigés.
+- `ITEM_MOVE_V1` : postcondition de déplacement de pile entière corrigée.
+- `ITEM_USE_V1` : postcondition des objets démarrant une quête corrigée ; le cas négatif « quête déjà acceptée » reste différé faute de cas runtime dédié.
+- `INVENTORY_EXACT_V1` : autorisation explicite côté Bridge corrigée.
+- `ITEM_EQUIP_V1` : fallback chat legacy remis sous le flag explicite de compatibilité.
+- Inventaire : recyclage de la frame et sécurité item/link en cold-cache corrigés ; les cas runtime cold-cache réel et Unequip exact sans cas reproductible restent différés.
+- `ITEM_USE_V1` : namespace locale et raisons d'échec localisées ; tooltip Inspect localisé dans les 8 locales auditées.
+- `VENDOR_BUYBACK_V1` : garde nil de création de frame ajoutée sans changement de protocole.
+- LuaLint : variable inutilisée `BUYBACK_ROWS` supprimée.
+- Les contrôles globaux LuaLint/CI restent une porte de sortie pré-merge et doivent encore être exécutés après cette synchronisation documentaire.
+
+### Audité et différé / non intégré
+
+- `GET~INVENTORY_BULK` : audité ; la forme Extended reste rejetée/différée tant qu'elle duplique sans bénéfice démontré `INVENTORY_EXACT_V1`.
+- `GET~BOT_SKILLS_BULK` : audité ; différé jusqu'à l'apparition d'un consommateur multi-bot réel.
+
+### Jellypowered restant à étudier
+
+L'ordre exact sera redécidé après synchronisation/commit de la branche ; **aucun de ces points n'est marqué comme prochain chantier actif par ce document**.
+
+- `BAG_MOVE` — déplacement/rééquipement de sacs ; priorité faible.
+- `ITEM_TRADE` — item exact, quantité, partenaire, distance, Trade actif, propriété et contrôle du bot ; ne pas régresser `ENCHANT_TRADE_V1`.
+- `QUEST_ABANDON` — endpoint spécialisé uniquement.
+- `QUEST_SHARE` — endpoint spécialisé uniquement.
+- `TALENT_APPLY` — audit strict des API Playerbots locales, points, niveau, reset/coût, combat et dual spec avant toute proposition.
+- `CRAFT_RECIPE_TARGET` — profession/recette/matériaux/outils/cible/Trade à revalider.
+- Banque / banque de guilde / vendeur — comparer avec l'existant et ne reprendre que des améliorations démontrables.
+- Comptage d'inventaire / restauration de sélection — comparer puis adapter uniquement si un défaut actuel est démontré.
+
+### Chantiers suspendus — inchangés
+
+À ne pas reprendre pendant la roadmap normale sauf demande explicite :
+
+- `SELL_GREY` / sell-grey core API / bridge-first ;
+- diagnostic réel final Firestone / Spellstone `TEMP_ENCHANTMENT_SLOT` ;
+- quatre warnings LuaLint restants dans `Strategies/MultiBotWarlock.lua` ;
+- autres petits reliquats déjà explicitement reportés.
+
+### Après le lot Jellypowered
+
+Le **prochain chantier normal** reste : **ajout/retrait d'items précis dans les règles de loot**.
+
+La décision du prochain sous-chantier Jellypowered restant sera prise après la synchronisation manuelle de la branche, à partir de cet état consolidé.

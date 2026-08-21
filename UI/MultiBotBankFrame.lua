@@ -172,7 +172,7 @@ local function getBankReasonText(reason)
         return ""
     end
 
-    return L("info.inventory.item_action.reason." .. reason, reason)
+    return L("info.inventory.item_action.reason." .. reason, L("info.inventory.item_action.reason.UNKNOWN", "The server returned an unknown item-action error."))
 end
 
 local function getBankModeTitle(mode)

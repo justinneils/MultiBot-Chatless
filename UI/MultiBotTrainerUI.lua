@@ -76,7 +76,7 @@ local function getReasonText(reason)
         return ""
     end
 
-    return L("info.trainer.reason." .. reason, reason)
+    return L("info.trainer.reason." .. reason, L("info.trainer.reason.UNKNOWN", "The server returned an unknown trainer error."))
 end
 
 local function getWindowTitle(botName)

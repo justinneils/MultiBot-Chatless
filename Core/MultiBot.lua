@@ -1845,6 +1845,78 @@ function MultiBot.BindUnitToggleHandlers(button, options)
   return button
 end
 
+-- MB_ISSUE33_SELF_BOT_V1_UI_BEGIN
+local function SetBridgeSelfBotButtonState(active)
+  local playerName = type(UnitName) == "function" and UnitName("player") or nil
+  local units = MultiBot.frames
+      and MultiBot.frames["MultiBar"]
+      and MultiBot.frames["MultiBar"].frames
+      and MultiBot.frames["MultiBar"].frames["Units"]
+      or nil
+  local button = units and units.buttons and playerName and units.buttons[playerName] or nil
+  if not button then
+    return false
+  end
+
+  if active == true then
+    if button.setEnable then
+      button.setEnable()
+    end
+  elseif button.setDisable then
+    button.setDisable()
+  end
+
+  button._mbSelfBotPending = false
+
+  if MultiBot.RelayoutUnitsDisplay then
+    MultiBot.RelayoutUnitsDisplay()
+  end
+
+  return true
+end
+
+function MultiBot.OnBridgeSelfBotState(active, _)
+  return SetBridgeSelfBotButtonState(active == true)
+end
+
+local function BindBridgeSelfBotHandler(button)
+  if not button then
+    return nil
+  end
+
+  button.doLeft = function(pButton)
+    if pButton._mbSelfBotPending then
+      return
+    end
+
+    local bridge = MultiBot.bridge
+    local comm = MultiBot.Comm
+    if bridge and bridge.connected == true and bridge.selfBotCapable == true
+        and comm and type(comm.RunSelfBot) == "function" then
+      local desiredState = pButton.state and "DISABLE" or "ENABLE"
+      pButton._mbSelfBotPending = true
+
+      local token = comm.RunSelfBot(desiredState, function()
+        pButton._mbSelfBotPending = false
+      end)
+
+      if not token then
+        pButton._mbSelfBotPending = false
+      end
+      return
+    end
+
+    if MultiBot.allowLegacyChatFallback == true then
+      SendChatMessage(".playerbot bot self", "SAY")
+      MultiBot.OnOffSwitch(pButton)
+    end
+  end
+
+  button._mbSelfBotHandlerBound = true
+  return button
+end
+-- MB_ISSUE33_SELF_BOT_V1_UI_END
+
 function MultiBot.SyncBridgeRosterToPlayers(roster)
   if type(roster) ~= "table" then
     return false
@@ -1910,8 +1982,22 @@ function MultiBot.SyncBridgeRosterToPlayers(roster)
     local _, playerClassToken = UnitClass("player")
     local playerClass = MultiBot.toClass(playerClassToken or "UNKNOWN")
     local selfButton = MultiBot.addSelf(playerClass, playerName)
-    if selfButton and selfButton.setDisable then
-      selfButton.setDisable()
+    if selfButton then
+      if MultiBot.bridge and MultiBot.bridge.selfBotLastActive == true then
+        if selfButton.setEnable then
+          selfButton.setEnable()
+        end
+      elseif selfButton.setDisable then
+        selfButton.setDisable()
+      end
+
+      BindBridgeSelfBotHandler(selfButton)
+
+      if MultiBot.bridge and MultiBot.bridge.connected == true
+          and MultiBot.bridge.selfBotCapable == true
+          and MultiBot.Comm and type(MultiBot.Comm.RequestSelfBotState) == "function" then
+        MultiBot.Comm.RequestSelfBotState()
+      end
     end
   end
 

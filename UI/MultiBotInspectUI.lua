@@ -98,7 +98,7 @@ local function requestInventorySync(botName)
     end
 end
 
-local function getSlotItemLink(inspectButton)
+local function getInspectSlotId(inspectButton)
     if not inspectButton then
         return nil
     end
@@ -108,12 +108,51 @@ local function getSlotItemLink(inspectButton)
         slotId = EQUIPMENT_SLOT_BY_NAME[inspectButton.mbSlotName or ""]
     end
 
+    slotId = tonumber(slotId)
+    if not slotId or slotId < 1 or slotId > 19 then
+        return nil
+    end
+
+    return slotId
+end
+
+local function getSlotItemLink(inspectButton)
+    local slotId = getInspectSlotId(inspectButton)
     local inspectUnit = InspectFrame and InspectFrame.unit
     if inspectUnit and UnitExists(inspectUnit) and slotId then
         return GetInventoryItemLink(inspectUnit, slotId)
     end
 
     return nil
+end
+
+local function getItemIdFromLink(itemLink)
+    if not itemLink or itemLink == "" then
+        return nil
+    end
+
+    local itemId = tonumber(string.match(itemLink, "|Hitem:(%d+)"))
+    if not itemId or itemId <= 0 then
+        return nil
+    end
+
+    return itemId
+end
+
+local function runBridgeItemUnequip(inspectButton, botName, itemLink)
+    local inspectSlotId = getInspectSlotId(inspectButton)
+    local itemId = getItemIdFromLink(itemLink)
+    if not inspectSlotId or not itemId then
+        return false
+    end
+
+    if not MultiBot.Comm or not MultiBot.Comm.RunInventoryItemUnequip then
+        return false
+    end
+
+    local serverSlot = inspectSlotId - 1
+    local token = MultiBot.Comm.RunInventoryItemUnequip(botName, serverSlot, itemId)
+    return token and true or false
 end
 
 local function showRightClickHint(self)
@@ -124,7 +163,7 @@ local function showRightClickHint(self)
     local botName = getInspectedBotName()
     if canUnequipInspectedBot(botName) then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Clic droit : déséquiper (ue)", 1, 0.82, 0)
+        GameTooltip:AddLine(MultiBot.L("inventory.inspect.unequip.tooltip", "Right-click: unequip"), 1, 0.82, 0)
         GameTooltip:Show()
     end
 end
@@ -144,7 +183,21 @@ local function onInspectSlotClick(self, mouseButton)
         return
     end
 
-    SendChatMessage("ue " .. itemLink, "WHISPER", nil, botName)
+    if runBridgeItemUnequip(self, botName, itemLink) then
+        return
+    end
+
+    if MultiBot.allowLegacyChatFallback == true then
+        SendChatMessage("ue " .. itemLink, "WHISPER", nil, botName)
+        requestInventorySync(botName)
+    end
+end
+
+MultiBot.OnBridgeInventoryItemUnequipResult = function(botName, status, reason)
+    if reason == "DISCONNECTED" then
+        return
+    end
+
     requestInventorySync(botName)
 end
 

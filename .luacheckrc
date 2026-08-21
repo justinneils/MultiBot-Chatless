@@ -29,11 +29,11 @@ globals = {
 	"SLASH_MBCLASS1", "SLASH_MBCLASSTEST1", "UIDropDownMenu_SetText", "UIDropDownMenu_SetWidth", "UIDropDownMenu_Initialize", "UIDropDownMenu_CreateInfo",
     "UIDropDownMenu_AddButton", "UIDropDownMenu_SetSelectedValue", "time", "isFav", "ToggleDropDownMenu", "LibStub", "SendAddonMessage", "WorldFrame", "GetMouseFocus",
 	"IsShiftKeyDown", "RAID_CLASS_COLORS", "ITEM", "UISpecialFrames", "IsControlKeyDown", "IsShiftKeyDown", "INV_SLOT_MAINHAND", "LoadAddOn", "ShowUIPanel", "HandleModifiedItemClick",
-	"ChatFontNormal", "UnitIsDead", "ShowPrompt", "GameFontHighlightSmall", "GameFontNormalSmall", "SEARCH", "UnitIsUnit", "MB_INVENTORY_LABEL", "INVENTORY_TOOLTIP", "BAGSLOT", "GetItemInfoInstant",
-	"sendInventoryItemCommand", "LE_ITEM_CLASS_QUESTITEM", "ITEMS", "LOADING", "QUEST_LOG", "INSPECT", "SPELLBOOK", "MB_TAB_TITLE_DEFAULT", "ensureHiddenTooltip", "IsInGuild", "GetGuildInfo", "GetGuildRosterShowOffline",
+	"ChatFontNormal", "UnitIsDead", "ShowPrompt", "GameFontHighlightSmall", "GameFontNormalSmall", "SEARCH", "UnitIsUnit", "MB_INVENTORY_LABEL", "INVENTORY_TOOLTIP", "BAGSLOT", "BACKPACK_TOOLTIP", "KEYRING", "GetItemInfoInstant",
+	"LE_ITEM_CLASS_QUESTITEM", "ITEMS", "LOADING", "QUEST_LOG", "INSPECT", "SPELLBOOK", "MB_TAB_TITLE_DEFAULT", "ensureHiddenTooltip", "IsInGuild", "GetGuildInfo", "GetGuildRosterShowOffline",
 	"SetGuildRosterShowOffline", "PLAYER","Ambiguate", "ChatFrame_AddMessageEventFilter", "ChatTypeInfo", "x", "y", "CLASS_ICON_TCOORDS", "GetLootSlotLink", "GetLootSlotInfo", "GetLootMethod", "GetMasterLootCandidate",
 	"LOCALIZED_CLASS_NAMES_MALE", "LOCALIZED_CLASS_NAMES_FEMALE", "date", "LootSlotIsCoin", "LootSlotIsItem", "classColor", "GetNumLootItems", "GetItemQualityColor", "GiveMasterLoot", "GetLootThreshold",
-	"QuestFrameRewardPanel", "QuestFrame", "GetFactionInfoByID", "PanelTemplates_SetTab", "PanelTemplates_SetNumTabs", "ABANDON_QUEST", "GetCoinTextureString", "InviteUnit"
+	"QuestFrameRewardPanel", "QuestFrame", "GetFactionInfoByID", "PanelTemplates_SetTab", "PanelTemplates_SetNumTabs", "ABANDON_QUEST", "GetCoinTextureString", "InviteUnit", "TradeFrame"
 	
 }
 

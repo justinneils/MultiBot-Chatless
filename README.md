@@ -97,6 +97,7 @@ GET~BOT_SKILLS
 GET~BOT_REPUTATIONS
 GET~BOT_EMBLEMS
 GET~PROFESSION_RECIPES
+GET~ENCHANT_TRADE
 GET~GLYPHS
 GET~OUTFITS
 GET~QUESTS
@@ -104,6 +105,8 @@ GET~GAMEOBJECTS
 GET~FORMATIONS
 RUN~CRAFT_RECIPE
 RUN~ITEM_ACTION
+RUN~ITEM_EQUIP
+RUN~ITEM_UNEQUIP
 RUN~OUTFIT
 RUN~RTI
 RUN~COMBAT
@@ -111,6 +114,8 @@ RUN~POSITION
 RUN~LOOT
 RUN~STRATEGY
 RUN~FORMATION
+RUN~GROUP_ROLL
+RUN~ENCHANT_TRADE
 ```
 
 The Formation family uses the following complete party/raid-wide contracts:
@@ -129,16 +134,31 @@ FORMATIONS_END~<token>~<sentCount>
 
 ## Current state and strategy capabilities
 
-The addon and bridge now negotiate two dedicated capabilities for authoritative bot-state synchronization and strategy mutations:
+The addon and bridge negotiate dedicated capabilities so newer write/read paths are used only when both sides support them:
 
 ```text
 STATE_FRAMING_V1
 STRATEGY_MUTATION_V1
+OUTFIT_V1
+INVENTORY_V1
+INVENTORY_EXACT_V1
+ITEM_MOVE_V1
+ITEM_EQUIP_V1
+ITEM_UNEQUIP_V1
+ITEM_USE_V1
+ITEM_SELL_SINGLE_V1
+VENDOR_BUYBACK_V1
+INVENTORY_BULK_SELL_V1
+INVENTORY_OPEN_V1
+GROUP_ROLL_V1
+ENCHANT_TRADE_V1
 ```
 
 `STATE_FRAMING_V1` uses tokenized `STATE` / `STATES` transactions with framed responses, bounded payloads, cleanup on terminal errors/timeouts, and stale-response protection. Per-bot requests use a 5-second timeout; global state requests use a 15-second timeout.
 
 `STRATEGY_MUTATION_V1` provides structured `co/nc` mutations through `RUN~STRATEGY` and completion through `STRATEGY_ACK`. The bridge reports matched, succeeded and failed bot counts, while the addon applies explicit timeout and rejection diagnostics.
+
+`INVENTORY_V1` provides the established native inventory read/refresh path. `INVENTORY_EXACT_V1` complements it with exact physical topology for Backpack, Bag 1..4 and Keyring, including empty slots and per-container filtering in the inventory UI. `ITEM_MOVE_V1` adds server-authoritative whole-stack drag/drop between allowed physical slots. The addon keeps only synthetic drag state: it does not call `PickupContainerItem`, `PickupInventoryItem`, `GetCursorInfo` or `ClearCursor`, and it does not mutate the displayed inventory optimistically; an exact snapshot refresh follows the server result. Stack splitting remains outside this capability. `ITEM_EQUIP_V1` equips an exact item from Backpack or Bag 1..4 through a structured bridge request and waits for the authoritative result before refreshing. `ITEM_UNEQUIP_V1` routes Inspect right-click through the exact equipment slot plus item ID, converts client Inspect slots 1..19 to Core slots 0..18, waits for the structured result and then refreshes. The historical `ue` whisper fallback is used only when `MultiBot.allowLegacyChatFallback == true`; normal bridge-first configuration keeps that fallback disabled. `ITEM_USE_V1` uses the exact physical source, waits for the structured `INVENTORY_ITEM_USE` result and delegates execution to the native use-item path. `ITEM_DESTROY` is a specialized exact-item destruction path with server-side source revalidation and an authoritative result. `ITEM_SELL_SINGLE_V1` validates the exact source and nearby vendor before native single-item sale and returns `INVENTORY_ITEM_SELL`. `VENDOR_BUYBACK_V1` exposes a structured Buyback list/result flow and uses the native Buyback handler before authoritative inventory/list refreshes. `INVENTORY_BULK_SELL_V1` and `INVENTORY_OPEN_V1` gate the current bulk-sell and `OPEN_ITEMS` bridge paths. `GROUP_ROLL_V1` gates the group Roll workflow; normal rolls and item-linked rolls are tokenized and completed through a structured `GROUP_ROLL_ACK`. `ENCHANT_TRADE_V1` gates the Enchanting Trade Service: the addon lists only known Enchanting spells exposed by the bot, uses the native WoW Trade window and the non-traded item slot, then requests one validated numeric spell ID through the bridge.
 
 The migration is intentionally incremental. The Warlock stone, soulstone, pet and curse selectors are now migrated to structured `RUN~STRATEGY` mutations. When those selectors use the bridge, the addon waits for authoritative server `STATE` data before committing the selected UI state instead of applying an optimistic local state. Other specialized legacy UI paths still issue Playerbots chat commands directly and must be migrated before the addon can be described as fully chatless.
 
@@ -158,6 +178,8 @@ still work when the player explicitly wants to inspect a bot state.
 The goal is not to remove useful manual commands.  
 The goal is to remove automatic UI-refresh spam.
 
+The remaining legacy Playerbots Trade inventory dump is also suppressed locally by the addon. The filter recognizes the exact `=== Inventory ===` dump from known bots and hides that automatic dump for Inventory -> Trade, Enchanting -> Trade and the native WoW client Trade action, while leaving the Trade workflow itself unchanged.
+
 ### Warlock weapon-enchant diagnostic
 
 For targeted runtime diagnostics, the addon exposes:
@@ -167,6 +189,8 @@ For targeted runtime diagnostics, the addon exposes:
 ```
 
 If the bot name is omitted, the current target is used. The command sends a single `GET~WEAPON_ENCHANT` request and displays the structured `WEAPON_ENCHANT` response with main-hand/off-hand item entries, temporary enchant IDs and remaining durations. This path is diagnostic only: it is on-demand, server-authorized and rate-limited, and is not used for polling or normal selector state synchronization.
+
+The endpoint and safe Firestone/Spellstone switching code are present, but the project-level final revalidation of the real `TEMP_ENCHANTMENT_SLOT` behavior is intentionally deferred until the end of the normal roadmap.
 
 ---
 
@@ -215,7 +239,47 @@ If the bot name is omitted, the current target is used. The command sends a sing
   </tr>
   <tr>
     <td>Inventory</td>
-    <td><strong>Bridge-first</strong> with icons and item tooltips</td>
+    <td><strong>Bridge-first, exact and bag-aware</strong> — <code>INVENTORY_V1</code> remains the established read/refresh path, while <code>INVENTORY_EXACT_V1</code> exposes Backpack, Bag 1..4 and Keyring with physical locations, empty slots and container filters</td>
+  </tr>
+  <tr>
+    <td>Inventory item move</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_MOVE_V1</code> moves one whole stack by synthetic addon drag/drop between allowed physical slots, waits for the structured server result and refreshes the exact snapshot without using the native player cursor APIs</td>
+  </tr>
+  <tr>
+    <td>Inventory item equip</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_EQUIP_V1</code> equips one exact item from Backpack or Bag 1..4 through the Bridge, waits for the structured result and refreshes authoritatively without optimistic UI mutation</td>
+  </tr>
+  <tr>
+    <td>Inspect item unequip</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_UNEQUIP_V1</code> routes Inspect right-click by exact equipment slot and item ID; the legacy <code>ue</code> whisper is available only when <code>MultiBot.allowLegacyChatFallback == true</code> and is disabled in normal bridge-first configuration</td>
+  </tr>
+  <tr>
+    <td>Inventory item use</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_USE_V1</code> revalidates the exact physical source, executes through the native use-item path, returns a structured result and refreshes authoritatively</td>
+  </tr>
+  <tr>
+    <td>Inventory item destroy</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_DESTROY</code> uses a specialized exact-item request with server-side source revalidation and an authoritative result</td>
+  </tr>
+  <tr>
+    <td>Inventory item single sell</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_SELL_SINGLE_V1</code> revalidates the exact source and nearby vendor, performs the native sale and returns a structured <code>INVENTORY_ITEM_SELL</code> result</td>
+  </tr>
+  <tr>
+    <td>Vendor Buyback</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>VENDOR_BUYBACK_V1</code> lists authoritative Buyback entries, executes one native buyback after server validation and refreshes inventory and Buyback state</td>
+  </tr>
+  <tr>
+    <td>Inventory bulk sell</td>
+    <td><strong>Bridge-first when supported</strong> — <code>INVENTORY_BULK_SELL_V1</code> routes <code>SELL_VENDOR</code> and the existing <code>SELL_GREY</code> action through the bridge; legacy per-item fallback remains a compatibility path, and further SELL_GREY work is deferred</td>
+  </tr>
+  <tr>
+    <td>Open items</td>
+    <td><strong>Bridge-first and validated</strong> — <code>INVENTORY_OPEN_V1</code> / <code>OPEN_ITEMS</code> with structured result handling and no silent chat fallback in normal bridge-first use</td>
+  </tr>
+  <tr>
+    <td>Group Roll</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>GROUP_ROLL_V1</code> supports normal 0–100 rolls and Shift+click item rolls with tokenized pending state, duplicate-send protection and structured ACK handling</td>
   </tr>
   <tr>
     <td>Spellbook</td>
@@ -232,6 +296,14 @@ If the bot name is omitted, the current target is used. The command sends a sing
   <tr>
     <td>Profession recipe frame</td>
     <td><strong>Bridge-first</strong> recipe listing and recipe crafting opened from Character Info profession and secondary skill rows</td>
+  </tr>
+  <tr>
+    <td>Enchanting Trade Service</td>
+    <td><strong>Bridge-first and runtime validated</strong> — <code>ENCHANT_TRADE_V1</code> exposes known Enchanting services, reagent/tool availability and native Trade-slot execution without a generic cast/chat executor; the same dedicated window is available from the enchanter EveryBar and Character Info, with UI text localized in all eight runtime locales</td>
+  </tr>
+  <tr>
+    <td>Trade inventory chat suppression</td>
+    <td><strong>Runtime validated</strong> — the legacy Playerbots <code>=== Inventory ===</code> Trade-start dump is hidden for Inventory, Enchanting and native client Trade openings; the filter is limited to the exact dump sequence from known bots and does not modify Playerbots or the Bridge</td>
   </tr>
   <tr>
     <td>Glyphs</td>
@@ -525,11 +597,22 @@ Implemented bridge-first / chatless areas:
 - Stats refresh.
 - PvP stats refresh.
 - Talent spec list refresh.
-- Inventory refresh with icons and item tooltips.
+- Inventory read/refresh through `INVENTORY_V1`, complemented by `INVENTORY_EXACT_V1` for bag-aware physical topology across Backpack, Bag 1..4 and Keyring, including empty slots and per-container filters.
+- Whole-stack inventory drag/drop through `ITEM_MOVE_V1`, with synthetic addon drag state, no native player cursor APIs, no optimistic inventory mutation and an exact snapshot refresh after the structured server result. Stack splitting remains out of scope.
+- Exact inventory equip through `ITEM_EQUIP_V1`, with source identity revalidation, authoritative result handling and no optimistic UI mutation.
+- Exact Inspect unequip through `ITEM_UNEQUIP_V1`, with exact equipment slot/item identity and legacy `ue` fallback disabled unless explicitly enabled.
+- Exact item use through `ITEM_USE_V1`, with native use-item execution, source revalidation, structured result handling and localized failure reasons.
+- Exact item destruction through the specialized `ITEM_DESTROY` path with server-side source revalidation.
+- Exact single-item vendor sale through `ITEM_SELL_SINGLE_V1`, with nearby-vendor validation, protected-item guards, replay/rate limiting and structured result handling.
+- Vendor Buyback through `VENDOR_BUYBACK_V1`, with structured list/result messages, native Buyback execution and authoritative inventory/list refreshes.
+- Bulk inventory sell through `INVENTORY_BULK_SELL_V1` when supported; `SELL_VENDOR` is bridge-first in normal current operation, while legacy compatibility fallback remains available and SELL_GREY follow-up is deferred.
+- `OPEN_ITEMS` through `INVENTORY_OPEN_V1`, with structured result handling and no silent chat fallback in the normal bridge-first path.
+- Group Roll through `GROUP_ROLL_V1`: normal 0–100 roll and Shift+click item roll, tokenized pending state, duplicate-send protection, timeout/cleanup handling and structured `GROUP_ROLL_ACK`.
 - Spellbook refresh, with profession/crafting spells separated from the combat spellbook path.
 - Character Info frame through the bridge with Blizzard-style tabs for class, profession, secondary, weapon and armor skills, reputations and currencies/emblems.
 - Bot bank and guild bank snapshots through the bridge, plus bank deposit/withdraw, guild bank deposit/withdraw and vendor buy item actions.
 - Profession recipe frame through the bridge, opened from profession and secondary skill rows.
+- Enchanting Trade Service through `ENCHANT_TRADE_V1`: dedicated enchanter-only UI from EveryBar/Character Info, known-spell listing, reagent/tool availability, native `TRADE_SLOT_NONTRADED` targeting and validated numeric spell execution without generic Playerbots command/chat dispatch.
 - Glyph refresh with icons and glyph tooltips.
 - Outfits refresh and actions through the bridge.
 - Outfit equip/replace without detailed `Equipping [item] ...` chat spam.
@@ -554,12 +637,22 @@ Validated development milestones on the current line:
 - PR #49 — bridge synchronization, strategy controls, persistent/offline favorites and STATE stabilization.
 - PR #50 — explicit strategy-command rejection diagnostics.
 - PR #51 — mechanical deduplication of shared roster workflow helpers.
+- PR #53 — prevent silent chat fallback for strategy mutations.
+- PR #54 — outfit actions migrated to the negotiated bridge capability.
+- PR #55 — strict bridge routing for inventory read/refresh.
+- PR #58 — single-bot inventory Sell Vendor migrated to the bridge.
+- PR #60 — bridge-first `OPEN_ITEMS`.
+- PR #61 — chatless Group Roll UI, merged as `106074c3c93f80812f73af27e746860c7c8a4dcf`.
 - Final static STATE/strategy audit on 2026-08-07: 57 checks, 0 failures; final manual runtime matrix remains pending.
-- Warlock selector batch validated on 2026-08-08: Stones, Soulstones, Pets and Curses migrated to bridge strategy mutations; authoritative bridge state handling validated; Firestone/Spellstone temporary-enchant switching validated bidirectionally with the companion bridge.
+- Warlock selector batch is migrated to bridge strategy mutations; final project-level real TEMP_ENCHANT revalidation and the four remaining LuaLint warnings are explicitly deferred.
+- Group Roll runtime validation on 2026-08-14: normal roll, item roll, eligibility, no chat spam, duplicate protection, invalid/empty item rejection and pending cleanup all validated.
+- Enchanting Trade Service runtime validation on 2026-08-14: enchanter-only button, list/search/tooltips, localized 440 px frame, normal WoW Trade flow and real item enchant application all validated with no automatic chat executor.
 
 Known migration remaining:
 
-- Remaining direct `SendChatMessage` occurrences outside the validated Warlock selector batch still need to be classified as manual command, diagnostic fallback, information message, UI mechanism to migrate, or dead code.
+- Remaining direct `SendChatMessage` occurrences outside migrated paths still need to be classified as manual command, diagnostic fallback, information message, UI mechanism to migrate, compatibility fallback, or dead code.
+- Item enchanting is now **implemented and runtime validated** through the closed `ENCHANT_TRADE_V1` Trade Service; it does not expose a generic cast or arbitrary Playerbots command executor.
+- The next normal roadmap item is **item-specific loot-rule add/remove**, followed by the Quest/Skill versus Disenchant decision and collective `follow` / `attack` / `stay` orders.
 - The project should be described as **bridge-first / mostly chatless**, not fully chatless, until these remaining paths are classified/migrated and the final runtime matrix is closed.
 
 Kept intentionally:
@@ -573,16 +666,22 @@ Kept intentionally:
 
 # Remaining Work
 
-The Outfits, RTI, Pull Control, Combat Strategy, Disperse, Loot Rules, Quest, Game Object, Character Info, Profession Recipe, Reputations, Currencies and advanced inventory bank/vendor migrations are implemented. The Loot Master UI is also implemented as an optional client-side master-loot helper. The next step is final stabilization and cleanup.
+The current line includes bridge-first inventory refresh, exact bag-aware inventory topology, native whole-stack item drag/drop, outfits, Sell Vendor, `OPEN_ITEMS`, Group Roll and the runtime-validated Enchanting Trade Service in addition to the previously migrated UI areas. The roadmap is intentionally continuing feature-family by feature-family rather than jumping directly to final cleanup.
 
-Planned follow-up work:
+Next normal roadmap work:
 
-- Regression test login, `/reload`, large raid groups, Units, EveryBars, Stats, PvP Stats, Inventory, Bot Bank, Guild Bank, Vendor Buy, Spellbook, Character Info, Reputations, Currencies, Profession Recipes, Talents, Glyphs, Outfits, Quests, Game Objects, RTI, Pull Control, Combat Strategies, Disperse, Loot Rules and Loot Master.
-- Verify that `MultiBot.allowLegacyChatFallback = false` prevents automatic legacy refresh spam on all migrated UI paths.
-- Keep manual diagnostic commands documented and functional.
-- Remove obsolete debug prints.
-- Remove dead legacy parser paths once bridge-first behavior is fully stable.
-- Update screenshots and user documentation after wider testing.
+1. Audit and implement item-specific loot-rule add/remove using verified Playerbots interfaces only.
+2. Decide the Quest/Skill versus Disenchant path from verified Playerbots capabilities.
+3. Audit collective `follow`, `attack` and `stay` selectors before any structured group-order migration.
+
+Explicitly deferred until the normal roadmap is complete:
+
+- SELL_GREY / sell-grey core API / bridge-first follow-up.
+- Final real Firestone/Spellstone `TEMP_ENCHANTMENT_SLOT` revalidation.
+- Four remaining LuaLint warnings in `Strategies/MultiBotWarlock.lua`.
+- Other small items that were explicitly deferred during previous validated batches.
+
+Ongoing finalization work remains unchanged: regression testing, classification of residual `SendChatMessage` paths, removal of dead legacy parsers only after proof of non-regression, and documentation/screenshot cleanup after wider testing.
 
 ---
 

@@ -65,6 +65,7 @@ UI\MultiBotStats.lua
 UI\MultiBotSpell.lua
 UI\MultiBotSpellBookFrame.lua
 UI\MultiBotCharacterInfoFrame.lua
+UI\MultiBotEnchantingUI.lua
 UI\MultiBotRewardFrame.lua
 UI\MultiBotOutfitUI.lua
 UI\MultiBotTrainerUI.lua

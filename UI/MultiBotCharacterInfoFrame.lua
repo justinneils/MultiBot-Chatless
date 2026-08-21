@@ -55,6 +55,7 @@ local RECIPE_CRAFT_BUTTON_WIDTH = 62
 local RECIPE_TEXT_WIDTH = 176
 local RECIPE_REFRESH_DELAY = 3.0
 local COOKING_SKILL_ID = 185
+local ENCHANTING_SKILL_ID = 333
 
 local REPUTATION_BAR_COLORS = {
     [0] = { 0.80, 0.12, 0.12 }, -- Hated
@@ -483,7 +484,7 @@ local function getCraftReasonText(reason, skillId)
         return string.format(L("profession.recipes.craft.reason.cast_code", "The server refused the cast (code %s)."), castCode)
     end
 
-    return L("profession.recipes.craft.reason." .. reason, reason)
+    return L("profession.recipes.craft.reason." .. reason, L("profession.recipes.craft.reason.UNKNOWN", "The server returned an unknown crafting error."))
 end
 
 local function scheduleRecipeRefresh(botName, skillId)
@@ -850,6 +851,15 @@ local function ensureCharacterFrame()
 
             if not self.skill then return end
             if self.skill.category ~= "profession" and self.skill.category ~= "secondary" then return end
+
+            if tonumber(self.skill.skillId or 0) == ENCHANTING_SKILL_ID
+                and MultiBot.IsBotEnchantingServiceAvailable
+                and MultiBot.IsBotEnchantingServiceAvailable(frame.botName)
+                and MultiBot.OpenBotEnchanting then
+                MultiBot.OpenBotEnchanting(frame.botName, nil)
+                return
+            end
+
             if MultiBot.Comm and MultiBot.Comm.RequestProfessionRecipes then
                 ensureRecipeFrame()
                 setWindowTitle(MultiBot.professionRecipeFrame, getSkillDisplayName(self.skill) .. " - " .. (frame.botName or ""))

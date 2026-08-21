@@ -13,10 +13,45 @@ Comm.version = "1"
 
 local STATE_FRAMING_CAPABILITY = "STATE_FRAMING_V1"
 local STRATEGY_MUTATION_CAPABILITY = "STRATEGY_MUTATION_V1"
+local SELF_ACTION_CAPABILITY = "SELF_ACTION_V1"
+local OUTFIT_CAPABILITY = "OUTFIT_V1"
+local INVENTORY_CAPABILITY = "INVENTORY_V1"
+local INVENTORY_EXACT_CAPABILITY = "INVENTORY_EXACT_V1"
+local INVENTORY_ITEM_MOVE_CAPABILITY = "ITEM_MOVE_V1"
+local INVENTORY_ITEM_EQUIP_CAPABILITY = "ITEM_EQUIP_V1"
+local INVENTORY_ITEM_UNEQUIP_CAPABILITY = "ITEM_UNEQUIP_V1"
+local INVENTORY_ITEM_DESTROY_CAPABILITY = "ITEM_DESTROY_V1"
+local INVENTORY_ITEM_USE_CAPABILITY = "ITEM_USE_V1"
+local INVENTORY_ITEM_SELL_CAPABILITY = "ITEM_SELL_SINGLE_V1"
+local INVENTORY_BULK_SELL_CAPABILITY = "INVENTORY_BULK_SELL_V1"
+local INVENTORY_OPEN_CAPABILITY = "INVENTORY_OPEN_V1"
+local GROUP_ROLL_CAPABILITY = "GROUP_ROLL_V1"
+local ENCHANT_TRADE_CAPABILITY = "ENCHANT_TRADE_V1"
+local SELF_BOT_TIMEOUT_SECONDS = 5.0
+local GROUP_ROLL_TIMEOUT_SECONDS = 5.0
+local ENCHANT_TRADE_TIMEOUT_SECONDS = 5.0
+local INVENTORY_ITEM_MOVE_TIMEOUT_SECONDS = 5.0
+local INVENTORY_ITEM_EQUIP_TIMEOUT_SECONDS = 5.0
+local INVENTORY_ITEM_UNEQUIP_TIMEOUT_SECONDS = 5.0
+local INVENTORY_ITEM_DESTROY_TIMEOUT_SECONDS = 5.0
+local INVENTORY_ITEM_USE_TIMEOUT_SECONDS = 5.0
+local INVENTORY_ITEM_SELL_TIMEOUT_SECONDS = 5.0
+local INVENTORY_BUYBACK_TIMEOUT_SECONDS = 5.0
+local INVENTORY_ITEM_MOVE_MAX_COUNT = 1000
+local INVENTORY_ITEM_EQUIP_MAX_COUNT = 1000
+local INVENTORY_ITEM_DESTROY_MAX_COUNT = 1000
+local INVENTORY_ITEM_USE_MAX_COUNT = 1000
+local INVENTORY_ITEM_SELL_MAX_COUNT = 1000
+local INVENTORY_BUYBACK_MAX_COUNT = 1000
+local ENCHANT_TRADE_MAX_ACTIVE = 8
+local GROUP_ROLL_MAX_ITEM_LINK_LENGTH = 160
 local STATE_TIMEOUT_SECONDS = 5.0
 local STATES_TIMEOUT_SECONDS = 15.0
 local STRATEGY_MUTATION_TIMEOUT_SECONDS = 5.0
+local SELF_STRATEGY_MUTATION_TIMEOUT_SECONDS = 10.0
+local SELF_ACTION_TIMEOUT_SECONDS = 10.0
 local STRATEGY_MUTATION_MAX_ACTIVE = 32
+local SELF_STRATEGY_MUTATION_MAX_ACTIVE = 1
 local STRATEGY_MUTATION_MAX_CHANGES_LENGTH = 160
 local STRATEGY_MUTATION_MAX_OPERATIONS = 32
 local STRATEGY_MUTATION_MAX_STRATEGY_LENGTH = 96
@@ -25,6 +60,14 @@ local STATE_MAX_BOTS = 128
 local STATE_MAX_STRATEGIES_PER_SCOPE = 256
 local STATE_MAX_STRATEGY_LENGTH = 192
 local STATE_MAX_TOTAL_BYTES = 32768
+local STATE_CAPABILITY_FALLBACK_SECONDS = 3.0
+local STATE_BOOTSTRAP_RETRY_SECONDS = 1.0
+local STATE_BOOTSTRAP_MAX_AUTO_ATTEMPTS = 3
+
+local requestBootstrapStates
+local flushPendingStateRefreshes
+local armCapabilityFallback
+local maybeResolveCapabilityFallback
 
 local function safeNow()
   if type(GetTime) == "function" then
@@ -53,6 +96,17 @@ local function trim(value)
   end
 
   return value:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function isInventoryViewCurrent(name)
+  local inventory = MultiBot and MultiBot.inventory or nil
+  if not inventory or not inventory.IsVisible or not inventory:IsVisible() then
+    return true
+  end
+
+  local activeName = trim(inventory.name)
+  name = trim(name)
+  return activeName == "" or name == "" or string.lower(activeName) == string.lower(name)
 end
 
 local function splitOnce(value, separator)
@@ -207,10 +261,56 @@ local function ensureBridgeState()
   state.stateLatestByBot = state.stateLatestByBot or {}
   state.stateLatestOrderByBot = state.stateLatestOrderByBot or {}
   state.stateGlobalLatestToken = state.stateGlobalLatestToken or nil
+  state.selfStrategyStateToken = state.selfStrategyStateToken or nil
   state.stateFramingCapable = state.stateFramingCapable or false
+  state.connectionGeneration = tonumber(state.connectionGeneration) or 0
+  state.capabilityFallbackDeadline = tonumber(state.capabilityFallbackDeadline) or 0
+  state.capabilityFallbackGeneration = tonumber(state.capabilityFallbackGeneration) or 0
+  state.capabilitiesResolved = state.capabilitiesResolved or false
+  state.capabilityBatchActive = state.capabilityBatchActive or false
+  state.bootstrapStatePending = state.bootstrapStatePending or false
+  state.bootstrapStateRequested = state.bootstrapStateRequested or false
+  state.bootstrapStateToken = state.bootstrapStateToken or nil
+  state.bootstrapStateAttempts = tonumber(state.bootstrapStateAttempts) or 0
+  state.pendingStateRefreshAll = state.pendingStateRefreshAll or false
+  state.pendingStateRefreshByBot = state.pendingStateRefreshByBot or {}
   state.strategyMutationCapable = state.strategyMutationCapable or false
+  state.selfStrategyCapable = state.selfStrategyCapable or false
+  state.selfActionCapable = state.selfActionCapable or false
+  state.outfitCapable = state.outfitCapable or false
+  state.inventoryCapable = state.inventoryCapable or false
+  state.inventoryExactCapable = state.inventoryExactCapable or false
+  state.inventoryItemMoveCapable = state.inventoryItemMoveCapable or false
+  state.inventoryItemEquipCapable = state.inventoryItemEquipCapable or false
+  state.inventoryItemUnequipCapable = state.inventoryItemUnequipCapable or false
+  state.inventoryItemDestroyCapable = state.inventoryItemDestroyCapable or false
+  state.inventoryItemUseCapable = state.inventoryItemUseCapable or false
+  state.inventoryItemSellCapable = state.inventoryItemSellCapable or false
+  state.inventoryBuybackCapable = state.inventoryBuybackCapable or false
+  state.inventoryBulkSellCapable = state.inventoryBulkSellCapable or false
+  state.inventoryOpenCapable = state.inventoryOpenCapable or false
+  state.groupRollCapable = state.groupRollCapable or false
+  state.enchantTradeCapable = state.enchantTradeCapable or false
+  state.selfBotCapable = state.selfBotCapable or false
+  state.selfBotStateSeq = state.selfBotStateSeq or 0
+  state.selfBotStateActive = state.selfBotStateActive or nil
+  state.selfBotCommandSeq = state.selfBotCommandSeq or 0
+  state.selfBotCommandActive = state.selfBotCommandActive or nil
+  state.selfBotMountNormalized = state.selfBotMountNormalized == true
+  state.selfBotMountNormalizePending = state.selfBotMountNormalizePending == true
+  state.selfBotMountNormalizeEpoch = tonumber(state.selfBotMountNormalizeEpoch) or 0
+  state.enchantTradeSeq = state.enchantTradeSeq or 0
+  state.enchantTradeActive = state.enchantTradeActive or nil
+  state.enchantTradeCommands = state.enchantTradeCommands or {}
+  state.enchantTradeLists = state.enchantTradeLists or {}
+  state.groupRollSeq = state.groupRollSeq or 0
+  state.groupRollCommands = state.groupRollCommands or {}
   state.strategyMutationSeq = state.strategyMutationSeq or 0
   state.strategyMutationCommands = state.strategyMutationCommands or {}
+  state.selfStrategySeq = state.selfStrategySeq or 0
+  state.selfStrategyCommands = state.selfStrategyCommands or {}
+  state.selfActionSeq = state.selfActionSeq or 0
+  state.selfActionCommands = state.selfActionCommands or {}
   state.weaponEnchantDebugSeq = state.weaponEnchantDebugSeq or 0
   state.details = state.details or {}
   state.professions = state.professions or {}
@@ -229,6 +329,25 @@ local function ensureBridgeState()
   state.bootstrapDeadline = state.bootstrapDeadline or 0
   state.inventorySeq = state.inventorySeq or 0
   state.inventoryActive = state.inventoryActive or nil
+  state.inventoryExactSeq = state.inventoryExactSeq or 0
+  state.inventoryExactActive = state.inventoryExactActive or nil
+  state.inventoryExactSnapshots = state.inventoryExactSnapshots or {}
+  state.inventoryItemMoveSeq = state.inventoryItemMoveSeq or 0
+  state.inventoryItemMoves = state.inventoryItemMoves or {}
+  state.inventoryItemEquipSeq = state.inventoryItemEquipSeq or 0
+  state.inventoryItemEquips = state.inventoryItemEquips or {}
+  state.inventoryItemUnequipSeq = state.inventoryItemUnequipSeq or 0
+  state.inventoryItemUnequips = state.inventoryItemUnequips or {}
+  state.inventoryItemDestroySeq = state.inventoryItemDestroySeq or 0
+  state.inventoryItemDestroys = state.inventoryItemDestroys or {}
+  state.inventoryItemUseSeq = state.inventoryItemUseSeq or 0
+  state.inventoryItemUses = state.inventoryItemUses or {}
+  state.inventoryItemSellSeq = state.inventoryItemSellSeq or 0
+  state.inventoryItemSells = state.inventoryItemSells or {}
+  state.inventoryBuybackSeq = state.inventoryBuybackSeq or 0
+  state.inventoryBuybackItemSeq = state.inventoryBuybackItemSeq or 0
+  state.inventoryBuybackActive = state.inventoryBuybackActive or nil
+  state.inventoryBuybackCommands = state.inventoryBuybackCommands or {}
   state.bankItems = state.bankItems or {}
   state.bankSeq = state.bankSeq or 0
   state.bankActive = state.bankActive or nil
@@ -312,6 +431,51 @@ local function clearStateRequest(state, token)
 
   clearStateTransactionsForToken(state, token)
   state.stateRequests[token] = nil
+
+  if state.selfStrategyStateToken == token then
+    state.selfStrategyStateToken = nil
+  end
+
+  if state.bootstrapStateToken == token then
+    state.bootstrapStateToken = nil
+  end
+end
+
+local function scheduleBootstrapStateRetry(generation)
+  local state = ensureBridgeState()
+  if state.bootstrapStateAttempts >= STATE_BOOTSTRAP_MAX_AUTO_ATTEMPTS then
+    return
+  end
+
+  if not (MultiBot and type(MultiBot.TimerAfter) == "function") then
+    return
+  end
+
+  MultiBot.TimerAfter(STATE_BOOTSTRAP_RETRY_SECONDS, function()
+    local bridge = ensureBridgeState()
+    if bridge.connectionGeneration ~= generation
+        or not bridge.connected
+        or not bridge.capabilitiesResolved
+        or bridge.bootstrapStateRequested
+        or not bridge.bootstrapStatePending then
+      return
+    end
+
+    requestBootstrapStates()
+  end)
+end
+
+local function failBootstrapStateRequest(state, token)
+  if state.bootstrapStateToken ~= token then
+    return false
+  end
+
+  local generation = state.connectionGeneration
+  state.bootstrapStateToken = nil
+  state.bootstrapStateRequested = false
+  state.bootstrapStatePending = true
+  scheduleBootstrapStateRetry(generation)
+  return true
 end
 
 local function scheduleStateTimeout(token, isGlobal)
@@ -326,6 +490,7 @@ local function scheduleStateTimeout(token, isGlobal)
       return
     end
 
+    failBootstrapStateRequest(state, token)
     clearStateRequest(state, token)
     state.lastError = "STATE_TIMEOUT~" .. token
   end)
@@ -354,10 +519,14 @@ local function beginStateRequest(state, botName, isGlobal)
 
   if isGlobal then
     local previous = state.stateGlobalLatestToken
+    local replacesBootstrap = previous and state.bootstrapStateToken == previous
     if previous and previous ~= token then
       clearStateRequest(state, previous)
     end
     state.stateGlobalLatestToken = token
+    if replacesBootstrap then
+      state.bootstrapStateToken = token
+    end
   else
     local botKey = string.lower(botName or "")
     local previous = state.stateLatestByBot[botKey]
@@ -450,11 +619,45 @@ function Comm.RequestRoster()
   return Comm.Send("GET", "ROSTER")
 end
 
+local function queuePendingStateRefresh(state, name, isGlobal)
+  if isGlobal then
+    state.pendingStateRefreshAll = true
+    state.pendingStateRefreshByBot = {}
+    return true
+  end
+
+  if state.pendingStateRefreshAll then
+    return true
+  end
+
+  local key = string.lower(name or "")
+  if key == "" then
+    return false
+  end
+
+  if countTableEntries(state.pendingStateRefreshByBot) >= STATE_MAX_BOTS
+      and state.pendingStateRefreshByBot[key] == nil then
+    state.pendingStateRefreshAll = true
+    state.pendingStateRefreshByBot = {}
+    return true
+  end
+
+  state.pendingStateRefreshByBot[key] = name
+  return true
+end
+
 function Comm.RequestState(name)
   local state = ensureBridgeState()
   name = trim(name)
   if name == "" then
     return false
+  end
+
+  if not state.capabilitiesResolved then
+    local queued = queuePendingStateRefresh(state, name, false)
+    armCapabilityFallback(state.connectionGeneration)
+    maybeResolveCapabilityFallback(state.connectionGeneration)
+    return queued
   end
 
   if not state.stateFramingCapable then
@@ -484,8 +687,54 @@ function Comm.RequestState(name)
   return token
 end
 
+function Comm.RequestSelfStrategyState()
+  local state = ensureBridgeState()
+  local name = getPlayerName()
+
+  if not name
+      or not state.connected
+      or state.selfStrategyCapable ~= true
+      or state.selfBotLastActive ~= true
+      or state.stateFramingCapable ~= true then
+    state.lastError = "SELF_STRATEGY_STATE_UNAVAILABLE"
+    return false
+  end
+
+  local token = beginStateRequest(state, name, false)
+  if not token then
+    state.lastError = "SELF_STRATEGY_STATE_TOO_MANY_REQUESTS"
+    return false
+  end
+
+  if not Comm.Send("GET", "SELF_STRATEGY_STATE~" .. token) then
+    clearStateRequest(state, token)
+    state.lastError = "SELF_STRATEGY_STATE_SEND_FAILED"
+    return false
+  end
+
+  state.selfStrategyStateToken = token
+
+  local request = state.stateRequests[token]
+  if type(request) == "table" then
+    local botKey = string.lower(name)
+    local requestOrder = tonumber(request.order) or 0
+    local latestOrder = tonumber(state.stateLatestOrderByBot[botKey]) or 0
+    if requestOrder > latestOrder then
+      state.stateLatestOrderByBot[botKey] = requestOrder
+    end
+  end
+
+  return token
+end
 function Comm.RequestStates()
   local state = ensureBridgeState()
+  if not state.capabilitiesResolved then
+    local queued = queuePendingStateRefresh(state, "", true)
+    armCapabilityFallback(state.connectionGeneration)
+    maybeResolveCapabilityFallback(state.connectionGeneration)
+    return queued
+  end
+
   if not state.stateFramingCapable then
     return Comm.Send("GET", "STATES")
   end
@@ -501,6 +750,141 @@ function Comm.RequestStates()
   end
 
   return token
+end
+
+requestBootstrapStates = function()
+  local state = ensureBridgeState()
+  if state.bootstrapStateRequested then
+    return false
+  end
+
+  if not state.capabilitiesResolved then
+    state.bootstrapStatePending = true
+    return true
+  end
+
+  if not Comm.RequestStates then
+    return false
+  end
+
+  local request = Comm.RequestStates()
+  if not request then
+    state.bootstrapStatePending = true
+    return false
+  end
+
+  state.bootstrapStatePending = false
+  state.bootstrapStateRequested = true
+  state.bootstrapStateAttempts = state.bootstrapStateAttempts + 1
+  state.bootstrapStateToken = type(request) == "string" and request or nil
+  return request
+end
+
+flushPendingStateRefreshes = function()
+  local state = ensureBridgeState()
+  if not state.capabilitiesResolved then
+    return false
+  end
+
+  if state.bootstrapStatePending and not state.bootstrapStateRequested then
+    if requestBootstrapStates() then
+      state.pendingStateRefreshAll = false
+      state.pendingStateRefreshByBot = {}
+      return true
+    end
+  elseif state.bootstrapStateRequested then
+    state.pendingStateRefreshAll = false
+    state.pendingStateRefreshByBot = {}
+    return true
+  end
+
+  if state.pendingStateRefreshAll then
+    state.pendingStateRefreshAll = false
+    state.pendingStateRefreshByBot = {}
+    if not Comm.RequestStates() then
+      state.pendingStateRefreshAll = true
+      return false
+    end
+    return true
+  end
+
+  local pending = state.pendingStateRefreshByBot
+  state.pendingStateRefreshByBot = {}
+  local sent = false
+  for key, name in pairs(pending or {}) do
+    if Comm.RequestState(name) then
+      sent = true
+    else
+      state.pendingStateRefreshByBot[key] = name
+    end
+  end
+
+  return sent
+end
+
+armCapabilityFallback = function(generation)
+  local state = ensureBridgeState()
+  if state.connectionGeneration ~= generation or state.capabilitiesResolved then
+    return false
+  end
+
+  if state.capabilityFallbackGeneration == generation
+      and state.capabilityFallbackDeadline > 0 then
+    return true
+  end
+
+  state.capabilityFallbackGeneration = generation
+  state.capabilityFallbackDeadline = safeNow() + STATE_CAPABILITY_FALLBACK_SECONDS
+
+  if MultiBot and type(MultiBot.TimerAfter) == "function" then
+    MultiBot.TimerAfter(STATE_CAPABILITY_FALLBACK_SECONDS, function()
+      maybeResolveCapabilityFallback(generation)
+    end)
+  end
+
+  return true
+end
+
+maybeResolveCapabilityFallback = function(generation)
+  local state = ensureBridgeState()
+  if state.connectionGeneration ~= generation
+      or state.capabilityFallbackGeneration ~= generation
+      or state.capabilitiesResolved
+      or not state.connected
+      or state.capabilityFallbackDeadline <= 0
+      or safeNow() < state.capabilityFallbackDeadline then
+    return false
+  end
+
+  if state.capabilityBatchActive then
+    state.capabilityBatchActive = false
+    state.stateFramingCapable = false
+    state.strategyMutationCapable = false
+state.selfStrategyCapable = false
+state.selfActionCapable = false
+    state.outfitCapable = false
+    state.inventoryCapable = false
+    state.inventoryExactCapable = false
+    state.inventoryItemMoveCapable = false
+    state.inventoryItemEquipCapable = false
+    state.inventoryItemUnequipCapable = false
+    state.inventoryItemDestroyCapable = false
+    state.inventoryItemUseCapable = false
+    state.inventoryItemSellCapable = false
+    state.inventoryBuybackCapable = false
+    state.inventoryBulkSellCapable = false
+    state.inventoryOpenCapable = false
+    state.groupRollCapable = false
+    state.enchantTradeCapable = false
+    state.selfBotCapable = false
+  end
+
+  state.capabilityFallbackDeadline = 0
+  state.capabilityFallbackGeneration = 0
+  state.stateFramingCapable = false
+  state.capabilitiesResolved = true
+  flushPendingStateRefreshes()
+  return true
 end
 
 function Comm.RequestBotDetail(name)
@@ -789,6 +1173,131 @@ function Comm.RunStrategyCommand(scope, target, stateScope, changes, callback)
   return token
 end
 
+local function finishSelfStrategyCommand(token, result)
+  local state = ensureBridgeState()
+  local pending = state.selfStrategyCommands[token]
+  if type(pending) ~= "table" then
+    return false
+  end
+
+  state.selfStrategyCommands[token] = nil
+  result = type(result) == "table" and result or {}
+  result.token = token
+  result.stateScope = result.stateScope or pending.stateScope
+  result.changes = result.changes or pending.changes
+
+  if type(pending.callback) == "function" then
+    pending.callback(result)
+  end
+
+  if MultiBot.OnSelfStrategyMutationApplied then
+    MultiBot.OnSelfStrategyMutationApplied(result)
+  end
+
+  return true
+end
+
+local function invalidateInactiveSelfBotWork(state)
+  state = type(state) == "table" and state or ensureBridgeState()
+
+  local strategyStateToken = state.selfStrategyStateToken
+  if type(strategyStateToken) == "string" and strategyStateToken ~= "" then
+    clearStateRequest(state, strategyStateToken)
+  end
+  state.selfStrategyStateToken = nil
+
+  local pendingSelfStrategyTokens = {}
+  for token in pairs(state.selfStrategyCommands or {}) do
+    pendingSelfStrategyTokens[#pendingSelfStrategyTokens + 1] = token
+  end
+  for _, token in ipairs(pendingSelfStrategyTokens) do
+    finishSelfStrategyCommand(token, {
+      status = "error",
+      reason = "SELF_STRATEGY_NOT_ACTIVE",
+    })
+  end
+  state.selfStrategyCommands = {}
+
+  -- SELF_ACTION consumers currently use callbacks for result/error reporting
+  -- only; there is no local optimistic button state to repair. Dropping these
+  -- requests prevents late ACKs from completing work that belonged to the
+  -- previous active SelfBot lifecycle without adding disable-time UI spam.
+  state.selfActionCommands = {}
+end
+
+function Comm.RunSelfStrategyCommand(stateScope, changes, callback)
+  local state = ensureBridgeState()
+
+  if not state.connected then
+    state.lastError = "SELF_STRATEGY_NOT_CONNECTED"
+    return false
+  end
+  if state.selfBotCapable ~= true then
+    state.lastError = "SELF_BOT_CAPABILITY_UNAVAILABLE"
+    return false
+  end
+  if state.selfStrategyCapable ~= true then
+    state.lastError = "SELF_STRATEGY_CAPABILITY_UNAVAILABLE"
+    return false
+  end
+  if state.selfBotLastActive ~= true then
+    state.lastError = "SELF_STRATEGY_NOT_ACTIVE"
+    return false
+  end
+
+  stateScope = string.upper(trim(stateScope or ""))
+  changes = validateStrategyMutationChanges(changes)
+
+  if stateScope ~= "C" and stateScope ~= "N" then
+    state.lastError = "SELF_STRATEGY_INVALID_STATE_SCOPE"
+    return false
+  end
+  if not changes then
+    state.lastError = "SELF_STRATEGY_INVALID_CHANGES"
+    return false
+  end
+  if countTableEntries(state.selfStrategyCommands) >= SELF_STRATEGY_MUTATION_MAX_ACTIVE then
+    state.lastError = "SELF_STRATEGY_TOO_MANY_REQUESTS"
+    return false
+  end
+
+  state.selfStrategySeq = (tonumber(state.selfStrategySeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-self-strategy-" .. tostring(state.selfStrategySeq)
+  state.selfStrategyCommands[token] = {
+    stateScope = stateScope,
+    changes = changes,
+    callback = type(callback) == "function" and callback or nil,
+    startedAt = safeNow(),
+  }
+
+  local payload = "SELF_STRATEGY~"
+    .. token .. "~"
+    .. stateScope .. "~"
+    .. urlEncodeField(changes)
+
+  if not Comm.Send("RUN", payload) then
+    state.selfStrategyCommands[token] = nil
+    state.lastError = "SELF_STRATEGY_SEND_FAILED"
+    return false
+  end
+
+  if MultiBot and type(MultiBot.TimerAfter) == "function" then
+    MultiBot.TimerAfter(SELF_STRATEGY_MUTATION_TIMEOUT_SECONDS, function()
+      local bridge = ensureBridgeState()
+      if not bridge.selfStrategyCommands[token] then
+        return
+      end
+
+      bridge.lastError = "SELF_STRATEGY_TIMEOUT~" .. token
+      finishSelfStrategyCommand(token, {
+        status = "timeout",
+        reason = "TIMEOUT",
+      })
+    end)
+  end
+
+  return token
+end
 function Comm.RunLootCommand(scope, target, command)
   local state = ensureBridgeState()
 
@@ -1089,7 +1598,7 @@ end
 function Comm.RequestOutfits(name)
   local state = ensureBridgeState()
   name = trim(name)
-  if name == "" or not state.connected then
+  if name == "" or not state.connected or state.outfitCapable ~= true then
     return false
   end
 
@@ -1111,11 +1620,11 @@ function Comm.RequestOutfits(name)
   return true
 end
 
-function Comm.RunOutfitCommand(name, commandSuffix, persist)
+function Comm.RunOutfitCommand(name, commandSuffix, persist, wasCreate)
   local state = ensureBridgeState()
   name = trim(name)
   commandSuffix = trim(commandSuffix)
-  if name == "" or commandSuffix == "" or not state.connected then
+  if name == "" or commandSuffix == "" or not state.connected or state.outfitCapable ~= true then
     return false
   end
 
@@ -1125,10 +1634,12 @@ function Comm.RunOutfitCommand(name, commandSuffix, persist)
     botName = name,
     botNameKey = string.lower(name),
     command = commandSuffix,
+    persist = persist == true,
+    wasCreate = wasCreate == true,
     startedAt = safeNow(),
   }
 
-  local persistToken = persist and "1" or "0"
+  local persistToken = persist == true and "1" or "0"
   if not Comm.Send("RUN", "OUTFIT~" .. name .. "~" .. token .. "~" .. urlEncodeField(commandSuffix) .. "~" .. persistToken) then
     state.outfitCommands[token] = nil
     return false
@@ -1298,10 +1809,350 @@ function Comm.RequestPvpStats(name)
   return Comm.Send("GET", "PVP_STATS")
 end
 
+-- MB_ISSUE33_SELF_BOT_V1_BEGIN
+local function finishSelfBotRequest(kind, token, result)
+  local state = ensureBridgeState()
+  local field = kind == "command" and "selfBotCommandActive" or "selfBotStateActive"
+  local pending = state[field]
+  if type(pending) ~= "table" or pending.token ~= token then
+    return false
+  end
+
+  state[field] = nil
+  result = type(result) == "table" and result or {}
+  result.token = token
+  result.kind = kind
+
+  -- Recovery state requests must never promote a cached/local fallback value
+  -- to authoritative UI state. Only a successfully parsed server response may
+  -- carry active through such a request.
+  if pending.authoritativeOnly == true and result.authoritative ~= true then
+    result.active = nil
+  end
+
+  if type(result.active) == "boolean" then
+    state.selfBotLastActive = result.active
+  end
+
+  if result.status == "ok" then
+    state.lastError = nil
+  else
+    state.lastError = "SELF_BOT_" .. tostring(result.reason or "UNKNOWN")
+  end
+
+  if type(result.active) == "boolean" and MultiBot.OnBridgeSelfBotState then
+    MultiBot.OnBridgeSelfBotState(result.active, result)
+  end
+
+  if type(pending.callback) == "function" then
+    pending.callback(result)
+  end
+
+  return true
+end
+
+local function normalizeSelfBotMountStrategy(state)
+  state = type(state) == "table" and state or ensureBridgeState()
+
+  if state.connected ~= true
+      or state.selfBotLastActive ~= true
+      or state.selfStrategyCapable ~= true
+      or type(Comm.RunSelfStrategyCommand) ~= "function" then
+    return false
+  end
+
+  if state.selfBotMountNormalized == true or state.selfBotMountNormalizePending == true then
+    return true
+  end
+
+  local generation = tonumber(state.connectionGeneration) or 0
+  local epoch = tonumber(state.selfBotMountNormalizeEpoch) or 0
+  state.selfBotMountNormalizePending = true
+
+  local token = Comm.RunSelfStrategyCommand("N", "-mount", function(result)
+    local bridge = ensureBridgeState()
+    if (tonumber(bridge.connectionGeneration) or 0) ~= generation
+        or (tonumber(bridge.selfBotMountNormalizeEpoch) or 0) ~= epoch then
+      return
+    end
+
+    bridge.selfBotMountNormalizePending = false
+    if bridge.selfBotLastActive == true
+        and type(result) == "table"
+        and result.status == "ok" then
+      bridge.selfBotMountNormalized = true
+      debugPrint("SELFBOT:MOUNT_NORMALIZE", "OK")
+    else
+      bridge.selfBotMountNormalized = false
+      debugPrint("SELFBOT:MOUNT_NORMALIZE", "FAILED",
+        type(result) == "table" and tostring(result.reason or result.status or "UNKNOWN") or "INVALID_RESULT")
+    end
+  end)
+
+  if token == false or token == nil then
+    state.selfBotMountNormalizePending = false
+    return false
+  end
+
+  debugPrint("SELFBOT:MOUNT_NORMALIZE", "SENT", tostring(token))
+  return true
+end
+
+-- Keep SELF_BOT response parsing outside Comm.HandleAddonMessage. WoW 3.3.5a
+-- uses Lua 5.1, whose function upvalue limit is 60; the main dispatcher is
+-- already close to that limit.
+function Comm.HandleSelfBotAddonMessage(opcode, payload, state)
+  if opcode ~= "SELF_BOT_STATE" and opcode ~= "SELF_BOT_RESULT" then
+    return false
+  end
+
+  state = type(state) == "table" and state or ensureBridgeState()
+
+  local fields = splitFields(payload or "")
+  local kind = opcode == "SELF_BOT_RESULT" and "command" or "state"
+  local pending = kind == "command" and state.selfBotCommandActive or state.selfBotStateActive
+
+  if #fields ~= 4 then
+    if type(pending) == "table" then
+      finishSelfBotRequest(kind, pending.token, {
+        status = "error",
+        active = type(state.selfBotLastActive) == "boolean" and state.selfBotLastActive or nil,
+        reason = "BAD_RESPONSE",
+      })
+    else
+      state.lastError = "SELF_BOT_BAD_RESPONSE"
+    end
+    return true
+  end
+
+  local token = trim(fields[1])
+  local status = string.upper(trim(fields[2]))
+  local activeText = trim(fields[3])
+  local reason = urlDecodeFieldStrict(fields[4], 64, false)
+
+  if type(pending) ~= "table" or pending.token ~= token then
+    return true
+  end
+
+  if not isValidStateToken(token)
+      or (status ~= "OK" and status ~= "ERR")
+      or (activeText ~= "0" and activeText ~= "1")
+      or reason == nil then
+    finishSelfBotRequest(kind, token, {
+      status = "error",
+      active = type(state.selfBotLastActive) == "boolean" and state.selfBotLastActive or nil,
+      reason = "BAD_RESPONSE",
+    })
+    return true
+  end
+
+  state.connected = true
+  finishSelfBotRequest(kind, token, {
+    status = status == "OK" and "ok" or "error",
+    active = activeText == "1",
+    authoritative = true,
+    reason = reason,
+    desiredState = type(pending) == "table" and pending.desiredState or nil,
+  })
+  if activeText == "0" then
+    state.selfBotMountNormalizeEpoch = (tonumber(state.selfBotMountNormalizeEpoch) or 0) + 1
+    state.selfBotMountNormalizePending = false
+    state.selfBotMountNormalized = false
+    invalidateInactiveSelfBotWork(state)
+  elseif state.selfStrategyCapable == true then
+    normalizeSelfBotMountStrategy(state)
+  end
+
+  if status == "OK" and activeText == "1" and state.selfStrategyCapable == true
+      and type(Comm.RequestSelfStrategyState) == "function" then
+    Comm.RequestSelfStrategyState()
+  end
+
+  debugPrint("ADDON:RX", opcode, token, status, activeText, reason)
+  return true
+end
+
+function Comm.HandleSelfBotProtocolError(requestType, token, reason, state)
+  if requestType ~= "SELF_BOT" then
+    return false
+  end
+
+  state = type(state) == "table" and state or ensureBridgeState()
+
+  if type(state.selfBotCommandActive) == "table"
+      and state.selfBotCommandActive.token == token then
+    finishSelfBotRequest("command", token, {
+      status = "error",
+      active = type(state.selfBotLastActive) == "boolean" and state.selfBotLastActive or nil,
+      reason = reason,
+      desiredState = state.selfBotCommandActive.desiredState,
+    })
+  elseif type(state.selfBotStateActive) == "table"
+      and state.selfBotStateActive.token == token then
+    finishSelfBotRequest("state", token, {
+      status = "error",
+      active = type(state.selfBotLastActive) == "boolean" and state.selfBotLastActive or nil,
+      reason = reason,
+    })
+  end
+
+  return true
+end
+
+function Comm.IsSelfBotCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.selfBotCapable == true
+end
+
+local function requestSelfBotState(callback, options)
+  local state = ensureBridgeState()
+  options = type(options) == "table" and options or {}
+  local allowDuringCommand = options.allowDuringCommand == true
+  local authoritativeOnly = options.authoritativeOnly == true
+
+  if not state.connected or state.selfBotCapable ~= true then
+    return false
+  end
+  if type(state.selfBotCommandActive) == "table" and not allowDuringCommand then
+    return false
+  end
+  if type(state.selfBotStateActive) == "table" then
+    -- A recovery caller requires its own completion callback. Do not silently
+    -- attach it to an unrelated state request.
+    if authoritativeOnly then
+      return false
+    end
+    return state.selfBotStateActive.token
+  end
+
+  state.selfBotStateSeq = (tonumber(state.selfBotStateSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000))
+      .. "-self-state-" .. tostring(state.selfBotStateSeq)
+  state.selfBotStateActive = {
+    token = token,
+    callback = type(callback) == "function" and callback or nil,
+    authoritativeOnly = authoritativeOnly,
+    startedAt = safeNow(),
+  }
+
+  if not Comm.Send("GET", "SELF_BOT~" .. token) then
+    state.selfBotStateActive = nil
+    state.lastError = "SELF_BOT_STATE_SEND_FAILED"
+    return false
+  end
+
+  if MultiBot and type(MultiBot.TimerAfter) == "function" then
+    MultiBot.TimerAfter(SELF_BOT_TIMEOUT_SECONDS, function()
+      local bridge = ensureBridgeState()
+      local pending = bridge.selfBotStateActive
+      if type(pending) ~= "table" or pending.token ~= token then
+        return
+      end
+
+      finishSelfBotRequest("state", token, {
+        status = "timeout",
+        active = type(bridge.selfBotLastActive) == "boolean" and bridge.selfBotLastActive or nil,
+        reason = "TIMEOUT",
+      })
+    end)
+  end
+
+  return token
+end
+
+function Comm.RequestSelfBotState(callback)
+  return requestSelfBotState(callback, nil)
+end
+
+function Comm.RunSelfBot(desiredState, callback)
+  local state = ensureBridgeState()
+  desiredState = string.upper(trim(desiredState or ""))
+
+  if not state.connected or state.selfBotCapable ~= true then
+    return false
+  end
+  if desiredState ~= "ENABLE" and desiredState ~= "DISABLE" then
+    return false
+  end
+  if type(state.selfBotCommandActive) == "table" then
+    return false
+  end
+
+  -- A state response created before this mutation is stale by definition.
+  local staleState = state.selfBotStateActive
+  if type(staleState) == "table" then
+    finishSelfBotRequest("state", staleState.token, {
+      status = "error",
+      reason = "SUPERSEDED",
+    })
+  end
+
+  state.selfBotCommandSeq = (tonumber(state.selfBotCommandSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000))
+      .. "-self-cmd-" .. tostring(state.selfBotCommandSeq)
+  state.selfBotCommandActive = {
+    token = token,
+    desiredState = desiredState,
+    callback = type(callback) == "function" and callback or nil,
+    startedAt = safeNow(),
+  }
+
+  if not Comm.Send("RUN", "SELF_BOT~" .. token .. "~" .. desiredState) then
+    state.selfBotCommandActive = nil
+    state.lastError = "SELF_BOT_SEND_FAILED"
+    return false
+  end
+
+  if MultiBot and type(MultiBot.TimerAfter) == "function" then
+    MultiBot.TimerAfter(SELF_BOT_TIMEOUT_SECONDS, function()
+      local bridge = ensureBridgeState()
+      local pending = bridge.selfBotCommandActive
+      if type(pending) ~= "table" or pending.token ~= token then
+        return
+      end
+
+      local desiredAtTimeout = pending.desiredState
+      local recoveryToken = requestSelfBotState(function(stateResult)
+        local current = ensureBridgeState().selfBotCommandActive
+        if type(current) ~= "table" or current.token ~= token then
+          return
+        end
+
+        finishSelfBotRequest("command", token, {
+          status = "timeout",
+          active = type(stateResult) == "table"
+              and type(stateResult.active) == "boolean"
+              and stateResult.active
+              or nil,
+          reason = "TIMEOUT",
+          desiredState = current.desiredState,
+        })
+      end, {
+        allowDuringCommand = true,
+        authoritativeOnly = true,
+      })
+
+      if not recoveryToken then
+        finishSelfBotRequest("command", token, {
+          status = "timeout",
+          reason = "TIMEOUT_STATE_REFRESH_FAILED",
+          desiredState = desiredAtTimeout,
+        })
+      end
+    end)
+  end
+
+  return token
+end
+-- MB_ISSUE33_SELF_BOT_V1_END
+
 function Comm.RequestInventory(name)
   local state = ensureBridgeState()
   name = trim(name)
-  if name == "" or not state.connected then
+  if name == "" or not state.connected or state.inventoryCapable ~= true then
+    return false
+  end
+  if not isInventoryViewCurrent(name) then
     return false
   end
 
@@ -1312,6 +2163,7 @@ function Comm.RequestInventory(name)
     botNameKey = string.lower(name),
     token = token,
     startedAt = safeNow(),
+    begun = false,
   }
 
   if not Comm.Send("GET", "INVENTORY~" .. name .. "~" .. token) then
@@ -1321,6 +2173,597 @@ function Comm.RequestInventory(name)
 
   return true
 end
+
+function Comm.RequestInventoryExact(name)
+  local state = ensureBridgeState()
+  name = trim(name)
+  if name == "" or not state.connected or state.inventoryExactCapable ~= true then
+    return false
+  end
+  if not isInventoryViewCurrent(name) then
+    return false
+  end
+
+  state.inventoryExactSeq = (tonumber(state.inventoryExactSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-invx-" .. tostring(state.inventoryExactSeq)
+  state.inventoryExactActive = {
+    botName = name,
+    botNameKey = string.lower(name),
+    token = token,
+    startedAt = safeNow(),
+    begun = false,
+    bags = {},
+    items = {},
+    itemsByPosition = {},
+  }
+
+  if not Comm.Send("GET", "INVENTORY_EXACT~" .. name .. "~" .. token) then
+    state.inventoryExactActive = nil
+    return false
+  end
+
+  return token
+end
+
+function Comm.GetInventoryExactSnapshot(name)
+  local state = ensureBridgeState()
+  name = trim(name)
+  if name == "" then
+    return nil
+  end
+
+  return state.inventoryExactSnapshots[string.lower(name)]
+end
+
+function Comm.IsInventoryItemMoveCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.inventoryExactCapable == true and state.inventoryItemMoveCapable == true
+end
+
+function Comm.RunInventoryItemMove(name, srcBag, srcSlot, srcItemId, srcCount, dstBag, dstSlot, dstItemId, dstCount)
+  local state = ensureBridgeState()
+  name = trim(name)
+
+  srcBag = parseBoundedInteger(tostring(srcBag or ""), 0, 255)
+  srcSlot = parseBoundedInteger(tostring(srcSlot or ""), 0, 255)
+  srcItemId = parseBoundedInteger(tostring(srcItemId or ""), 1, 4294967295)
+  srcCount = parseBoundedInteger(tostring(srcCount or ""), 1, INVENTORY_ITEM_MOVE_MAX_COUNT)
+  dstBag = parseBoundedInteger(tostring(dstBag or ""), 0, 255)
+  dstSlot = parseBoundedInteger(tostring(dstSlot or ""), 0, 255)
+  dstItemId = parseBoundedInteger(tostring(dstItemId or ""), 0, 4294967295)
+  dstCount = parseBoundedInteger(tostring(dstCount or ""), 0, INVENTORY_ITEM_MOVE_MAX_COUNT)
+
+  if name == "" or not state.connected or state.inventoryExactCapable ~= true or state.inventoryItemMoveCapable ~= true then
+    return false
+  end
+  if not srcBag or not srcSlot or not srcItemId or not srcCount or not dstBag or not dstSlot or dstItemId == nil or dstCount == nil then
+    return false
+  end
+  if (dstItemId == 0 and dstCount ~= 0) or (dstItemId ~= 0 and dstCount == 0) then
+    return false
+  end
+  if srcBag == dstBag and srcSlot == dstSlot then
+    return false
+  end
+
+  state.inventoryItemMoveSeq = (tonumber(state.inventoryItemMoveSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-move-" .. tostring(state.inventoryItemMoveSeq)
+  local command = {
+    token = token,
+    botName = name,
+    botNameKey = string.lower(name),
+    srcBag = srcBag,
+    srcSlot = srcSlot,
+    srcItemId = srcItemId,
+    srcCount = srcCount,
+    dstBag = dstBag,
+    dstSlot = dstSlot,
+    dstItemId = dstItemId,
+    dstCount = dstCount,
+    startedAt = safeNow(),
+  }
+  state.inventoryItemMoves[token] = command
+
+  local payload = table.concat({
+    "ITEM_MOVE", name, token,
+    tostring(srcBag), tostring(srcSlot), tostring(srcItemId), tostring(srcCount),
+    tostring(dstBag), tostring(dstSlot), tostring(dstItemId), tostring(dstCount),
+  }, "~")
+
+  if not Comm.Send("RUN", payload) then
+    state.inventoryItemMoves[token] = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_ITEM_MOVE_TIMEOUT_SECONDS, function()
+    local bridge = ensureBridgeState()
+    local pending = bridge.inventoryItemMoves and bridge.inventoryItemMoves[token] or nil
+    if not pending then
+      return
+    end
+
+    bridge.inventoryItemMoves[token] = nil
+    bridge.lastError = "ITEM_MOVE_TIMEOUT"
+    if MultiBot.OnBridgeInventoryItemMoveResult then
+      MultiBot.OnBridgeInventoryItemMoveResult(
+        pending.botName, "ERR", "TIMEOUT",
+        pending.srcBag, pending.srcSlot, pending.dstBag, pending.dstSlot, pending
+      )
+    end
+  end)
+
+  return token
+end
+
+function Comm.IsInventoryItemEquipCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.inventoryExactCapable == true and state.inventoryItemEquipCapable == true
+end
+
+function Comm.RunInventoryItemEquip(name, srcBag, srcSlot, srcItemId, srcCount)
+  local state = ensureBridgeState()
+  name = trim(name)
+
+  srcBag = parseBoundedInteger(tostring(srcBag or ""), 0, 255)
+  srcSlot = parseBoundedInteger(tostring(srcSlot or ""), 0, 255)
+  srcItemId = parseBoundedInteger(tostring(srcItemId or ""), 1, 4294967295)
+  srcCount = parseBoundedInteger(tostring(srcCount or ""), 1, INVENTORY_ITEM_EQUIP_MAX_COUNT)
+
+  if name == "" or not state.connected or state.inventoryExactCapable ~= true or state.inventoryItemEquipCapable ~= true then
+    return false
+  end
+  if not srcBag or not srcSlot or not srcItemId or not srcCount then
+    return false
+  end
+
+  state.inventoryItemEquipSeq = (tonumber(state.inventoryItemEquipSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-equip-" .. tostring(state.inventoryItemEquipSeq)
+  local command = {
+    token = token,
+    botName = name,
+    botNameKey = string.lower(name),
+    srcBag = srcBag,
+    srcSlot = srcSlot,
+    srcItemId = srcItemId,
+    srcCount = srcCount,
+    startedAt = safeNow(),
+  }
+  state.inventoryItemEquips[token] = command
+
+  local payload = table.concat({
+    "ITEM_EQUIP", name, token,
+    tostring(srcBag), tostring(srcSlot), tostring(srcItemId), tostring(srcCount),
+  }, "~")
+
+  if not Comm.Send("RUN", payload) then
+    state.inventoryItemEquips[token] = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_ITEM_EQUIP_TIMEOUT_SECONDS, function()
+    local bridge = ensureBridgeState()
+    local pending = bridge.inventoryItemEquips and bridge.inventoryItemEquips[token] or nil
+    if not pending then
+      return
+    end
+
+    bridge.inventoryItemEquips[token] = nil
+    bridge.lastError = "ITEM_EQUIP_TIMEOUT"
+    if bridge.connected then
+      local refreshed = MultiBot.RequestInventoryRefresh
+        and MultiBot.RequestInventoryRefresh(pending.botName, 0.30)
+      if not refreshed and Comm.RequestInventoryExact then
+        Comm.RequestInventoryExact(pending.botName)
+      end
+    end
+  end)
+
+  return token
+end
+
+function Comm.IsInventoryItemUnequipCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.inventoryItemUnequipCapable == true
+end
+
+function Comm.RunInventoryItemUnequip(name, srcSlot, srcItemId)
+  local state = ensureBridgeState()
+  name = trim(name)
+
+  srcSlot = parseBoundedInteger(tostring(srcSlot or ""), 0, 18)
+  srcItemId = parseBoundedInteger(tostring(srcItemId or ""), 1, 4294967295)
+
+  if name == "" or not state.connected or state.inventoryItemUnequipCapable ~= true then
+    return false
+  end
+  if srcSlot == nil or not srcItemId then
+    return false
+  end
+
+  state.inventoryItemUnequipSeq = (tonumber(state.inventoryItemUnequipSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-unequip-" .. tostring(state.inventoryItemUnequipSeq)
+  local command = {
+    token = token,
+    botName = name,
+    botNameKey = string.lower(name),
+    srcSlot = srcSlot,
+    srcItemId = srcItemId,
+    startedAt = safeNow(),
+  }
+  state.inventoryItemUnequips[token] = command
+
+  local payload = table.concat({
+    "ITEM_UNEQUIP", name, token,
+    tostring(srcSlot), tostring(srcItemId),
+  }, "~")
+
+  if not Comm.Send("RUN", payload) then
+    state.inventoryItemUnequips[token] = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_ITEM_UNEQUIP_TIMEOUT_SECONDS, function()
+    local bridge = ensureBridgeState()
+    local pending = bridge.inventoryItemUnequips and bridge.inventoryItemUnequips[token] or nil
+    if not pending then
+      return
+    end
+
+    bridge.inventoryItemUnequips[token] = nil
+    bridge.lastError = "ITEM_UNEQUIP_TIMEOUT"
+    if MultiBot.OnBridgeInventoryItemUnequipResult then
+      MultiBot.OnBridgeInventoryItemUnequipResult(
+        pending.botName, "ERR", "TIMEOUT", pending.srcSlot, pending.srcItemId, pending
+      )
+    end
+  end)
+
+  return token
+end
+
+function Comm.IsInventoryItemDestroyCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.inventoryExactCapable == true and state.inventoryItemDestroyCapable == true
+end
+
+function Comm.RunInventoryItemDestroy(name, srcBag, srcSlot, srcItemId, srcCount)
+  local state = ensureBridgeState()
+  name = trim(name)
+
+  srcBag = parseBoundedInteger(tostring(srcBag or ""), 0, 255)
+  srcSlot = parseBoundedInteger(tostring(srcSlot or ""), 0, 255)
+  srcItemId = parseBoundedInteger(tostring(srcItemId or ""), 1, 4294967295)
+  srcCount = parseBoundedInteger(tostring(srcCount or ""), 1, INVENTORY_ITEM_DESTROY_MAX_COUNT)
+
+  if name == "" or not state.connected or state.inventoryExactCapable ~= true or state.inventoryItemDestroyCapable ~= true then
+    return false
+  end
+  if srcBag == nil or srcSlot == nil or not srcItemId or not srcCount then
+    return false
+  end
+
+  state.inventoryItemDestroySeq = (tonumber(state.inventoryItemDestroySeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-destroy-" .. tostring(state.inventoryItemDestroySeq)
+  local command = {
+    token = token,
+    botName = name,
+    botNameKey = string.lower(name),
+    srcBag = srcBag,
+    srcSlot = srcSlot,
+    srcItemId = srcItemId,
+    srcCount = srcCount,
+    startedAt = safeNow(),
+  }
+  state.inventoryItemDestroys[token] = command
+
+  local payload = table.concat({
+    "ITEM_DESTROY", name, token,
+    tostring(srcBag), tostring(srcSlot), tostring(srcItemId), tostring(srcCount),
+  }, "~")
+
+  if not Comm.Send("RUN", payload) then
+    state.inventoryItemDestroys[token] = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_ITEM_DESTROY_TIMEOUT_SECONDS, function()
+    local bridgeState = ensureBridgeState()
+    local pending = bridgeState.inventoryItemDestroys and bridgeState.inventoryItemDestroys[token] or nil
+    if not pending then
+      return
+    end
+
+    bridgeState.inventoryItemDestroys[token] = nil
+    bridgeState.lastError = "ITEM_DESTROY_TIMEOUT"
+    if MultiBot.OnBridgeInventoryItemDestroyResult then
+      MultiBot.OnBridgeInventoryItemDestroyResult(
+        pending.botName, "ERR", "TIMEOUT",
+        pending.srcBag, pending.srcSlot, pending.srcItemId, pending
+      )
+    end
+  end)
+
+  return token
+end
+function Comm.IsInventoryItemUseCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.inventoryExactCapable == true and state.inventoryItemUseCapable == true
+end
+
+function Comm.RunInventoryItemUse(name, srcBag, srcSlot, srcItemId, srcCount)
+  local state = ensureBridgeState()
+  name = trim(name)
+
+  srcBag = parseBoundedInteger(tostring(srcBag or ""), 0, 255)
+  srcSlot = parseBoundedInteger(tostring(srcSlot or ""), 0, 255)
+  srcItemId = parseBoundedInteger(tostring(srcItemId or ""), 1, 4294967295)
+  srcCount = parseBoundedInteger(tostring(srcCount or ""), 1, INVENTORY_ITEM_USE_MAX_COUNT)
+
+  if name == "" or not state.connected or state.inventoryExactCapable ~= true or state.inventoryItemUseCapable ~= true then
+    return false
+  end
+  if srcBag == nil or srcSlot == nil or not srcItemId or not srcCount then
+    return false
+  end
+
+  local botNameKey = string.lower(name)
+  for _, pending in pairs(state.inventoryItemUses or {}) do
+    if pending.botNameKey == botNameKey
+        and pending.srcBag == srcBag
+        and pending.srcSlot == srcSlot
+        and pending.srcItemId == srcItemId
+        and pending.srcCount == srcCount then
+      return false
+    end
+  end
+
+  state.inventoryItemUseSeq = (tonumber(state.inventoryItemUseSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-use-" .. tostring(state.inventoryItemUseSeq)
+  local command = {
+    token = token,
+    botName = name,
+    botNameKey = botNameKey,
+    srcBag = srcBag,
+    srcSlot = srcSlot,
+    srcItemId = srcItemId,
+    srcCount = srcCount,
+    startedAt = safeNow(),
+  }
+  state.inventoryItemUses[token] = command
+
+  local payload = table.concat({
+    "ITEM_USE", name, token,
+    tostring(srcBag), tostring(srcSlot), tostring(srcItemId), tostring(srcCount),
+  }, "~")
+
+  if not Comm.Send("RUN", payload) then
+    state.inventoryItemUses[token] = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_ITEM_USE_TIMEOUT_SECONDS, function()
+    local bridgeState = ensureBridgeState()
+    local pending = bridgeState.inventoryItemUses and bridgeState.inventoryItemUses[token] or nil
+    if not pending then
+      return
+    end
+
+    bridgeState.inventoryItemUses[token] = nil
+    bridgeState.lastError = "ITEM_USE_TIMEOUT"
+    if MultiBot.OnBridgeInventoryItemUseResult then
+      MultiBot.OnBridgeInventoryItemUseResult(
+        pending.botName, "ERR", "TIMEOUT",
+        pending.srcBag, pending.srcSlot, pending.srcItemId, pending
+      )
+    end
+  end)
+
+  return token
+end
+
+-- MB_ITEM_SELL_SINGLE_V1_COMM_BEGIN
+function Comm.IsInventoryItemSellCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.inventoryExactCapable == true and state.inventoryItemSellCapable == true
+end
+
+function Comm.RunInventoryItemSell(name, srcBag, srcSlot, srcItemId, srcCount)
+  local state = ensureBridgeState()
+  name = trim(name)
+
+  srcBag = parseBoundedInteger(tostring(srcBag or ""), 0, 255)
+  srcSlot = parseBoundedInteger(tostring(srcSlot or ""), 0, 255)
+  srcItemId = parseBoundedInteger(tostring(srcItemId or ""), 1, 4294967295)
+  srcCount = parseBoundedInteger(tostring(srcCount or ""), 1, INVENTORY_ITEM_SELL_MAX_COUNT)
+
+  if name == "" or not state.connected or state.inventoryExactCapable ~= true or state.inventoryItemSellCapable ~= true then
+    return false
+  end
+  if srcBag == nil or srcSlot == nil or not srcItemId or not srcCount then
+    return false
+  end
+
+  local botNameKey = string.lower(name)
+  for _, pending in pairs(state.inventoryItemSells or {}) do
+    if pending.botNameKey == botNameKey
+        and pending.srcBag == srcBag
+        and pending.srcSlot == srcSlot
+        and pending.srcItemId == srcItemId
+        and pending.srcCount == srcCount then
+      return false
+    end
+  end
+
+  state.inventoryItemSellSeq = (tonumber(state.inventoryItemSellSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-sell-" .. tostring(state.inventoryItemSellSeq)
+  local command = {
+    token = token,
+    botName = name,
+    botNameKey = botNameKey,
+    srcBag = srcBag,
+    srcSlot = srcSlot,
+    srcItemId = srcItemId,
+    srcCount = srcCount,
+    startedAt = safeNow(),
+  }
+  state.inventoryItemSells[token] = command
+
+  local payload = table.concat({
+    "ITEM_SELL", name, token,
+    tostring(srcBag), tostring(srcSlot), tostring(srcItemId), tostring(srcCount),
+  }, "~")
+
+  if not Comm.Send("RUN", payload) then
+    state.inventoryItemSells[token] = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_ITEM_SELL_TIMEOUT_SECONDS, function()
+    local bridgeState = ensureBridgeState()
+    local pending = bridgeState.inventoryItemSells and bridgeState.inventoryItemSells[token] or nil
+    if not pending then
+      return
+    end
+
+    bridgeState.inventoryItemSells[token] = nil
+    bridgeState.lastError = "ITEM_SELL_TIMEOUT"
+    if MultiBot.OnBridgeInventoryItemSellResult then
+      MultiBot.OnBridgeInventoryItemSellResult(
+        pending.botName, "ERR", "TIMEOUT",
+        pending.srcBag, pending.srcSlot, pending.srcItemId, 0, pending
+      )
+    end
+  end)
+
+  return token
+end
+-- MB_ITEM_SELL_SINGLE_V1_COMM_END
+-- MB_VENDOR_BUYBACK_V1_COMM_BEGIN
+function Comm.IsInventoryBuybackCapable()
+  local state = ensureBridgeState()
+  return state.connected == true
+    and state.inventoryExactCapable == true
+    and state.inventoryBuybackCapable == true
+end
+
+function Comm.RequestInventoryBuyback(name)
+  local state = ensureBridgeState()
+  name = trim(name)
+
+  if name == "" or not Comm.IsInventoryBuybackCapable() then
+    return false
+  end
+  if type(state.inventoryBuybackActive) == "table" then
+    return false
+  end
+
+  state.inventoryBuybackSeq = (tonumber(state.inventoryBuybackSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-buyback-list-" .. tostring(state.inventoryBuybackSeq)
+  state.inventoryBuybackActive = {
+    token = token,
+    botName = name,
+    botNameKey = string.lower(name),
+    startedAt = safeNow(),
+    begun = false,
+    expectedCount = nil,
+    items = {},
+    seenSlots = {},
+    error = nil,
+  }
+
+  if not Comm.Send("GET", "BUYBACK~" .. name .. "~" .. token) then
+    state.inventoryBuybackActive = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_BUYBACK_TIMEOUT_SECONDS, function()
+    local bridgeState = ensureBridgeState()
+    local active = bridgeState.inventoryBuybackActive
+    if type(active) ~= "table" or active.token ~= token then
+      return
+    end
+
+    bridgeState.inventoryBuybackActive = nil
+    bridgeState.lastError = "BUYBACK_TIMEOUT"
+    if MultiBot.OnBridgeInventoryBuybackList then
+      MultiBot.OnBridgeInventoryBuybackList(active.botName, {}, {
+        token = token,
+        status = "ERR",
+        reason = "TIMEOUT",
+      })
+    end
+  end)
+
+  return token
+end
+
+function Comm.RunInventoryBuyback(name, slot, itemId, count, price)
+  local state = ensureBridgeState()
+  name = trim(name)
+  slot = parseBoundedInteger(tostring(slot or ""), 74, 85)
+  itemId = parseBoundedInteger(tostring(itemId or ""), 1, 4294967295)
+  count = parseBoundedInteger(tostring(count or ""), 1, INVENTORY_BUYBACK_MAX_COUNT)
+  price = parseBoundedInteger(tostring(price or ""), 0, 4294967295)
+
+  if name == "" or not Comm.IsInventoryBuybackCapable() then
+    return false
+  end
+  if slot == nil or itemId == nil or count == nil or price == nil then
+    return false
+  end
+
+  local botNameKey = string.lower(name)
+  for _, pending in pairs(state.inventoryBuybackCommands or {}) do
+    if pending.botNameKey == botNameKey and pending.slot == slot then
+      return false
+    end
+  end
+
+  state.inventoryBuybackItemSeq = (tonumber(state.inventoryBuybackItemSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-buyback-item-" .. tostring(state.inventoryBuybackItemSeq)
+  local command = {
+    token = token,
+    botName = name,
+    botNameKey = botNameKey,
+    slot = slot,
+    itemId = itemId,
+    count = count,
+    price = price,
+    startedAt = safeNow(),
+  }
+  state.inventoryBuybackCommands[token] = command
+
+  local payload = table.concat({
+    "BUYBACK_ITEM", name, token,
+    tostring(slot), tostring(itemId), tostring(count), tostring(price),
+  }, "~")
+
+  if not Comm.Send("RUN", payload) then
+    state.inventoryBuybackCommands[token] = nil
+    return false
+  end
+
+  safeDelay(INVENTORY_BUYBACK_TIMEOUT_SECONDS, function()
+    local bridgeState = ensureBridgeState()
+    local pending = bridgeState.inventoryBuybackCommands and bridgeState.inventoryBuybackCommands[token] or nil
+    if not pending then
+      return
+    end
+
+    bridgeState.inventoryBuybackCommands[token] = nil
+    bridgeState.lastError = "BUYBACK_TIMEOUT"
+    if MultiBot.OnBridgeInventoryBuybackResult then
+      MultiBot.OnBridgeInventoryBuybackResult(
+        pending.botName, "ERR", "TIMEOUT",
+        pending.slot, pending.itemId, pending.count, pending.price, pending
+      )
+    end
+  end)
+
+  return token
+end
+-- MB_VENDOR_BUYBACK_V1_COMM_END
+
 
 function Comm.RequestBank(name)
   local state = ensureBridgeState()
@@ -1501,6 +2944,143 @@ function Comm.RequestProfessionRecipes(name, skillId)
   return true
 end
 
+function Comm.IsEnchantTradeCapable()
+  local state = ensureBridgeState()
+  return state.connected == true and state.enchantTradeCapable == true
+end
+
+function Comm.IsBotEnchanter(name)
+  local state = ensureBridgeState()
+  name = string.lower(trim(name))
+  if name == "" then
+    return false
+  end
+
+  local entry = state.professions and state.professions[name] or nil
+  return type(entry) == "table"
+      and type(entry.professions) == "table"
+      and entry.professions.enchanting ~= nil
+end
+
+local function scheduleEnchantTradeListTimeout(name, token, delaySeconds)
+  safeDelay(delaySeconds or ENCHANT_TRADE_TIMEOUT_SECONDS, function()
+    local bridge = ensureBridgeState()
+    local active = bridge.enchantTradeActive
+    if type(active) ~= "table" or active.token ~= token then
+      return
+    end
+
+    local now = safeNow()
+    local lastProgressAt = tonumber(active.lastProgressAt) or tonumber(active.startedAt) or 0
+    if now > 0 and lastProgressAt > 0 then
+      local idleSeconds = now - lastProgressAt
+      if idleSeconds < ENCHANT_TRADE_TIMEOUT_SECONDS
+          and MultiBot
+          and type(MultiBot.TimerAfter) == "function" then
+        scheduleEnchantTradeListTimeout(
+          name,
+          token,
+          math.max(0.05, ENCHANT_TRADE_TIMEOUT_SECONDS - idleSeconds)
+        )
+        return
+      end
+    end
+
+    bridge.enchantTradeActive = nil
+    if MultiBot.OnBridgeEnchantTradeList then
+      MultiBot.OnBridgeEnchantTradeList(active.botName or name, {}, {
+        token = token,
+        status = "ERR",
+        reason = "TIMEOUT",
+        skillValue = 0,
+        maxSkill = 0,
+      })
+    end
+  end)
+end
+
+local function markEnchantTradeListProgress(active)
+  if type(active) == "table" then
+    active.lastProgressAt = safeNow()
+  end
+end
+
+function Comm.RequestEnchantTrade(name)
+  local state = ensureBridgeState()
+  name = trim(name)
+  if name == "" or not state.connected or state.enchantTradeCapable ~= true then
+    return false
+  end
+
+  state.enchantTradeSeq = (tonumber(state.enchantTradeSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-ench-list-" .. tostring(state.enchantTradeSeq)
+  local now = safeNow()
+  state.enchantTradeActive = {
+    botName = name,
+    botNameKey = string.lower(name),
+    token = token,
+    startedAt = now,
+    lastProgressAt = now,
+    began = false,
+    status = "PENDING",
+    reason = "",
+    skillValue = 0,
+    maxSkill = 0,
+    items = {},
+  }
+
+  if not Comm.Send("GET", "ENCHANT_TRADE~" .. name .. "~" .. token) then
+    state.enchantTradeActive = nil
+    return false
+  end
+
+  scheduleEnchantTradeListTimeout(name, token, ENCHANT_TRADE_TIMEOUT_SECONDS)
+  return token
+end
+
+function Comm.RunEnchantTrade(name, spellId)
+  local state = ensureBridgeState()
+  name = trim(name)
+  spellId = tonumber(spellId or 0) or 0
+  if name == "" or spellId <= 0 or not state.connected or state.enchantTradeCapable ~= true then
+    return false
+  end
+
+  if countTableEntries(state.enchantTradeCommands) >= ENCHANT_TRADE_MAX_ACTIVE then
+    return false
+  end
+
+  state.enchantTradeSeq = (tonumber(state.enchantTradeSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-ench-run-" .. tostring(state.enchantTradeSeq)
+  state.enchantTradeCommands[token] = {
+    botName = name,
+    botNameKey = string.lower(name),
+    spellId = spellId,
+    token = token,
+    startedAt = safeNow(),
+  }
+
+  if not Comm.Send("RUN", "ENCHANT_TRADE~" .. name .. "~" .. token .. "~" .. tostring(spellId)) then
+    state.enchantTradeCommands[token] = nil
+    return false
+  end
+
+  safeDelay(ENCHANT_TRADE_TIMEOUT_SECONDS, function()
+    local bridge = ensureBridgeState()
+    local command = bridge.enchantTradeCommands[token]
+    if not command then
+      return
+    end
+
+    bridge.enchantTradeCommands[token] = nil
+    if MultiBot.OnBridgeEnchantTradeResult then
+      MultiBot.OnBridgeEnchantTradeResult(command.botName, command.spellId, "ERR", "TIMEOUT", command)
+    end
+  end)
+
+  return token
+end
+
 function Comm.RunProfessionRecipeCraft(name, skillId, spellId, itemId)
   local state = ensureBridgeState()
   name = trim(name)
@@ -1530,13 +3110,106 @@ function Comm.RunProfessionRecipeCraft(name, skillId, spellId, itemId)
   return token
 end
 
+local function finishGroupRollCommand(token, result)
+  local state = ensureBridgeState()
+  local pending = state.groupRollCommands[token]
+  if not pending then
+    return false
+  end
+
+  state.groupRollCommands[token] = nil
+  result = type(result) == "table" and result or {}
+  result.token = token
+  result.mode = result.mode or pending.mode
+
+  if type(pending.callback) == "function" then
+    pending.callback(result)
+  end
+
+  if MultiBot.OnGroupRollResult then
+    MultiBot.OnGroupRollResult(result)
+  end
+
+  return true
+end
+
+function Comm.RunGroupRoll(itemLink, callback)
+  local state = ensureBridgeState()
+  if not state.connected or state.groupRollCapable ~= true then
+    return false
+  end
+
+  itemLink = trim(itemLink or "")
+  local mode = "NORMAL"
+  if itemLink ~= "" then
+    if #itemLink > GROUP_ROLL_MAX_ITEM_LINK_LENGTH or not string.find(itemLink, "|Hitem:", 1, true) then
+      return false
+    end
+    mode = "ITEM"
+  end
+
+  state.groupRollSeq = (tonumber(state.groupRollSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-roll-" .. tostring(state.groupRollSeq)
+  state.groupRollCommands[token] = {
+    mode = mode,
+    callback = type(callback) == "function" and callback or nil,
+    startedAt = safeNow(),
+  }
+
+  local payload = "GROUP_ROLL~" .. token .. "~" .. mode
+  if mode == "ITEM" then
+    payload = payload .. "~" .. urlEncodeField(itemLink)
+  end
+
+  if not Comm.Send("RUN", payload) then
+    state.groupRollCommands[token] = nil
+    return false
+  end
+
+  safeDelay(GROUP_ROLL_TIMEOUT_SECONDS, function()
+    local bridge = ensureBridgeState()
+    if not bridge.groupRollCommands[token] then
+      return
+    end
+
+    finishGroupRollCommand(token, {
+      status = "timeout",
+      matched = 0,
+      invoked = 0,
+      reason = "TIMEOUT",
+    })
+  end)
+
+  return token
+end
+
 function Comm.RunInventoryItemAction(name, action, itemId, count)
   local state = ensureBridgeState()
   name = trim(name)
   action = string.upper(trim(action))
   itemId = tonumber(itemId or 0) or 0
   count = tonumber(count or 0) or 0
-  if name == "" or action == "" or itemId <= 0 or count < 0 or not state.connected then
+
+  local isBulkSellAction = action == "SELL_GREY" or action == "SELL_VENDOR"
+  local isOpenItemsAction = action == "OPEN_ITEMS"
+  local allowsZeroItemId = isBulkSellAction or isOpenItemsAction
+  if name == "" or action == "" or itemId < 0 or count < 0 or not state.connected then
+    return false
+  end
+  if allowsZeroItemId then
+    if state.inventoryCapable ~= true then
+      return false
+    end
+    if isBulkSellAction and state.inventoryBulkSellCapable ~= true then
+      return false
+    end
+    if isOpenItemsAction and state.inventoryOpenCapable ~= true then
+      return false
+    end
+    if itemId ~= 0 or count ~= 0 then
+      return false
+    end
+  elseif itemId <= 0 then
     return false
   end
 
@@ -1561,20 +3234,155 @@ end
 
 function Comm.MarkDisconnected(reason)
   local state = ensureBridgeState()
+  state.connectionGeneration = state.connectionGeneration + 1
   state.connected = false
   state.server = nil
   state.protocol = nil
   state.lastError = reason or nil
+  state.capabilityBatchActive = false
   state.inventoryActive = nil
+  state.inventoryExactActive = nil
+  state.inventoryExactSnapshots = {}
+
+  local selfBotStatePending = state.selfBotStateActive
+  local selfBotCommandPending = state.selfBotCommandActive
+  state.selfBotStateActive = nil
+  state.selfBotCommandActive = nil
+  state.selfBotLastActive = nil
+  if MultiBot and type(MultiBot.OnBridgeSelfBotState) == "function" then
+    MultiBot.OnBridgeSelfBotState(false, reason or "DISCONNECTED")
+  end
+  state.selfBotMountNormalizeEpoch = (tonumber(state.selfBotMountNormalizeEpoch) or 0) + 1
+  state.selfBotMountNormalizePending = false
+  state.selfBotMountNormalized = false
+
+  if type(selfBotStatePending) == "table" and type(selfBotStatePending.callback) == "function" then
+    selfBotStatePending.callback({
+      status = "error",
+      active = nil,
+      reason = "DISCONNECTED",
+      token = selfBotStatePending.token,
+      kind = "state",
+    })
+  end
+
+  if type(selfBotCommandPending) == "table" and type(selfBotCommandPending.callback) == "function" then
+    selfBotCommandPending.callback({
+      status = "error",
+      active = nil,
+      reason = "DISCONNECTED",
+      token = selfBotCommandPending.token,
+      kind = "command",
+      desiredState = selfBotCommandPending.desiredState,
+    })
+  end
+
+  for _, command in pairs(state.inventoryItemMoves or {}) do
+    if MultiBot.OnBridgeInventoryItemMoveResult then
+      MultiBot.OnBridgeInventoryItemMoveResult(
+        command.botName or "", "ERR", "DISCONNECTED",
+        command.srcBag or 0, command.srcSlot or 0, command.dstBag or 0, command.dstSlot or 0, command
+      )
+    end
+  end
+  state.inventoryItemMoves = {}
+  state.inventoryItemEquips = {}
+  for _, command in pairs(state.inventoryItemUnequips or {}) do
+    if MultiBot.OnBridgeInventoryItemUnequipResult then
+      MultiBot.OnBridgeInventoryItemUnequipResult(
+        command.botName or "", "ERR", "DISCONNECTED", command.srcSlot or 0, command.srcItemId or 0, command
+      )
+    end
+  end
+  state.inventoryItemUnequips = {}
+  for _, command in pairs(state.inventoryItemDestroys or {}) do
+    if MultiBot.OnBridgeInventoryItemDestroyResult then
+      MultiBot.OnBridgeInventoryItemDestroyResult(
+        command.botName or "", "ERR", "DISCONNECTED",
+        command.srcBag or 0, command.srcSlot or 0, command.srcItemId or 0, command
+      )
+    end
+  end
+  state.inventoryItemDestroys = {}
+  for _, command in pairs(state.inventoryItemUses or {}) do
+    if MultiBot.OnBridgeInventoryItemUseResult then
+      MultiBot.OnBridgeInventoryItemUseResult(
+        command.botName or "", "ERR", "DISCONNECTED",
+        command.srcBag or 0, command.srcSlot or 0, command.srcItemId or 0, command
+      )
+    end
+  end
+  state.inventoryItemUses = {}
+  for _, command in pairs(state.inventoryItemSells or {}) do
+    if MultiBot.OnBridgeInventoryItemSellResult then
+      MultiBot.OnBridgeInventoryItemSellResult(
+        command.botName or "", "ERR", "DISCONNECTED",
+        command.srcBag or 0, command.srcSlot or 0, command.srcItemId or 0, 0, command
+      )
+    end
+  end
+  state.inventoryItemSells = {}
+  if type(state.inventoryBuybackActive) == "table" and MultiBot.OnBridgeInventoryBuybackList then
+    MultiBot.OnBridgeInventoryBuybackList(state.inventoryBuybackActive.botName or "", {}, {
+      token = state.inventoryBuybackActive.token or "",
+      status = "ERR",
+      reason = "DISCONNECTED",
+    })
+  end
+  state.inventoryBuybackActive = nil
+  for _, command in pairs(state.inventoryBuybackCommands or {}) do
+    if MultiBot.OnBridgeInventoryBuybackResult then
+      MultiBot.OnBridgeInventoryBuybackResult(
+        command.botName or "", "ERR", "DISCONNECTED",
+        command.slot or 74, command.itemId or 0, command.count or 0, command.price or 0, command
+      )
+    end
+  end
+  state.inventoryBuybackCommands = {}
+
+
   state.bankActive = nil
   state.guildBankActive = nil
   state.inventoryItemActions = {}
+
+  local pendingRollTokens = {}
+  for token in pairs(state.groupRollCommands or {}) do
+    pendingRollTokens[#pendingRollTokens + 1] = token
+  end
+  for _, token in ipairs(pendingRollTokens) do
+    finishGroupRollCommand(token, {
+      status = "error",
+      matched = 0,
+      invoked = 0,
+      reason = "DISCONNECTED",
+    })
+  end
+  state.groupRollCommands = {}
+
   state.spellbookActive = nil
   state.botSkillActive = nil
   state.botReputationActive = nil
   state.botEmblemActive = nil
   state.professionRecipeActive = nil
   state.professionRecipeCrafts = {}
+
+  if type(state.enchantTradeActive) == "table" and MultiBot.OnBridgeEnchantTradeList then
+    MultiBot.OnBridgeEnchantTradeList(state.enchantTradeActive.botName or "", {}, {
+      token = state.enchantTradeActive.token or "",
+      status = "ERR",
+      reason = "DISCONNECTED",
+      skillValue = 0,
+      maxSkill = 0,
+    })
+  end
+  for _, command in pairs(state.enchantTradeCommands or {}) do
+    if MultiBot.OnBridgeEnchantTradeResult then
+      MultiBot.OnBridgeEnchantTradeResult(command.botName or "", command.spellId or 0, "ERR", "DISCONNECTED", command)
+    end
+  end
+  state.enchantTradeActive = nil
+  state.enchantTradeCommands = {}
+  state.enchantTradeLists = {}
   state.outfitActive = nil
   state.outfitCommands = {}
   state.trainerActive = nil
@@ -1582,7 +3390,60 @@ function Comm.MarkDisconnected(reason)
   state.formationCommands = {}
   state.formationQueryActive = nil
   state.strategyMutationCapable = false
+state.selfStrategyCapable = false
+state.selfActionCapable = false
+  state.outfitCapable = false
+  state.inventoryCapable = false
+  state.inventoryExactCapable = false
+  state.inventoryItemMoveCapable = false
+  state.inventoryItemEquipCapable = false
+  state.inventoryItemUnequipCapable = false
+  state.inventoryItemDestroyCapable = false
+  state.inventoryItemUseCapable = false
+  state.inventoryItemSellCapable = false
+  state.inventoryBuybackCapable = false
+  state.inventoryBulkSellCapable = false
+  state.inventoryOpenCapable = false
+  state.groupRollCapable = false
+  state.enchantTradeCapable = false
+  state.selfBotCapable = false
   state.stateFramingCapable = false
+  state.capabilityFallbackDeadline = 0
+  state.capabilityFallbackGeneration = 0
+  state.capabilitiesResolved = false
+  state.bootstrapStatePending = false
+  state.bootstrapStateRequested = false
+  state.bootstrapStateToken = nil
+  state.bootstrapStateAttempts = 0
+  state.pendingStateRefreshAll = false
+  state.pendingStateRefreshByBot = {}
+
+  if MultiBot.RefreshEnchantingEveryButtons then
+    MultiBot.RefreshEnchantingEveryButtons()
+  end
+
+  local pendingSelfStrategyTokens = {}
+  for token in pairs(state.selfStrategyCommands or {}) do
+    pendingSelfStrategyTokens[#pendingSelfStrategyTokens + 1] = token
+  end
+  for _, token in ipairs(pendingSelfStrategyTokens) do
+    finishSelfStrategyCommand(token, {
+      status = "error",
+      reason = "DISCONNECTED",
+    })
+  end
+  state.selfStrategyCommands = {}
+
+  for token, pending in pairs(state.selfActionCommands or {}) do
+    if type(pending) == "table" and type(pending.callback) == "function" then
+      pending.callback({
+        status = "error",
+        action = pending.action,
+        reason = "DISCONNECTED",
+      })
+    end
+  end
+  state.selfActionCommands = {}
 
   local pendingTokens = {}
   for token in pairs(state.strategyMutationCommands or {}) do
@@ -1601,6 +3462,7 @@ function Comm.MarkDisconnected(reason)
 
   state.stateRequests = {}
   state.stateActive = {}
+  state.selfStrategyStateToken = nil
   state.stateLatestByBot = {}
   state.stateLatestOrderByBot = {}
   state.stateGlobalLatestToken = nil
@@ -1764,6 +3626,7 @@ local function abortStateRequest(token, reason)
     return false
   end
 
+  failBootstrapStateRequest(state, token)
   clearStateRequest(state, token)
   state.lastError = "STATE_ABORT~" .. token .. "~" .. tostring(reason or "UNKNOWN")
   debugPrint("ADDON:RX", "STATE_ABORT", token, reason or "UNKNOWN")
@@ -2652,7 +4515,7 @@ function Comm.ApplyOutfitCommandPayload(payload)
   command.result = result
 
   if MultiBot.OutfitUI and MultiBot.OutfitUI.HandleBridgeCommandResult then
-    MultiBot.OutfitUI:HandleBridgeCommandResult(command.botName, token, result)
+    MultiBot.OutfitUI:HandleBridgeCommandResult(command.botName, token, result, command.command, command.wasCreate == true)
   end
 
   state.outfitCommands[token] = nil
@@ -3013,6 +4876,10 @@ local function getActiveInventoryRequest(botName, token)
   if string.lower(trim(botName)) ~= tostring(active.botNameKey or "") then
     return nil
   end
+  if not isInventoryViewCurrent(active.botName) then
+    state.inventoryActive = nil
+    return nil
+  end
 
   return active
 end
@@ -3022,6 +4889,46 @@ local function clearActiveInventoryRequest(botName, token)
   if getActiveInventoryRequest(botName, token) then
     state.inventoryActive = nil
   end
+end
+
+local function getActiveInventoryExactRequest(botName, token)
+  local state = ensureBridgeState()
+  local active = state.inventoryExactActive
+  if type(active) ~= "table" then
+    return nil
+  end
+
+  if trim(token) ~= trim(active.token) then
+    return nil
+  end
+
+  if string.lower(trim(botName)) ~= tostring(active.botNameKey or "") then
+    return nil
+  end
+  if not isInventoryViewCurrent(active.botName) then
+    state.inventoryExactActive = nil
+    return nil
+  end
+
+  return active
+end
+
+local function clearActiveInventoryExactRequest(botName, token)
+  local state = ensureBridgeState()
+  if getActiveInventoryExactRequest(botName, token) then
+    state.inventoryExactActive = nil
+  end
+end
+
+local function isWholeNumberInRange(value, minimum, maximum)
+  value = tonumber(value)
+  if not value or value ~= math.floor(value) then
+    return nil
+  end
+  if value < minimum or value > maximum then
+    return nil
+  end
+  return value
 end
 
 local function getActiveBankRequest(botName, token)
@@ -3183,6 +5090,24 @@ local function getActiveProfessionRecipeRequest(botName, token, skillId)
   return active
 end
 
+local function getActiveEnchantTradeRequest(botName, token)
+  local state = ensureBridgeState()
+  local active = state.enchantTradeActive
+  if type(active) ~= "table" then
+    return nil
+  end
+
+  if botName and botName ~= "" and string.lower(trim(botName)) ~= trim(active.botNameKey or "") then
+    return nil
+  end
+
+  if token and token ~= "" and tostring(token) ~= tostring(active.token or "") then
+    return nil
+  end
+
+  return active
+end
+
 local function parseRecipeMaterials(raw)
   local materials = {}
   for token in string.gmatch(raw or "", "([^;]+)") do
@@ -3197,36 +5122,490 @@ local function parseRecipeMaterials(raw)
   return materials
 end
 
+-- MB_VENDOR_BUYBACK_V1_RX_HELPER_BEGIN
+function Comm.HandleInventoryBuybackAddonMessage(opcode, payload, state)
+  if opcode == "BUYBACK_BEGIN" then
+    local fields = splitFields(payload)
+    local active = state.inventoryBuybackActive
+    if #fields ~= 3 then
+      state.lastError = "BUYBACK_BAD_RESPONSE"
+      if type(active) == "table" then active.error = "BAD_RESPONSE" end
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local count = parseBoundedInteger(fields[3], 0, 12)
+    if not botName or not isValidStateToken(token) or count == nil then
+      state.lastError = "BUYBACK_BAD_RESPONSE"
+      if type(active) == "table" then active.error = "BAD_RESPONSE" end
+      return true
+    end
+    if type(active) ~= "table" or active.token ~= token then
+      return true
+    end
+    if string.lower(botName) ~= active.botNameKey then
+      active.error = "RESPONSE_MISMATCH"
+      return true
+    end
+
+    active.begun = true
+    active.expectedCount = count
+    active.items = {}
+    active.seenSlots = {}
+    active.error = nil
+    state.connected = true
+    return true
+  end
+
+  if opcode == "BUYBACK_ITEM" then
+    local fields = splitFields(payload)
+    local active = state.inventoryBuybackActive
+    if #fields ~= 7 then
+      state.lastError = "BUYBACK_BAD_RESPONSE"
+      if type(active) == "table" then active.error = "BAD_RESPONSE" end
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local slot = parseBoundedInteger(fields[3], 74, 85)
+    local itemId = parseBoundedInteger(fields[4], 1, 4294967295)
+    local count = parseBoundedInteger(fields[5], 1, INVENTORY_BUYBACK_MAX_COUNT)
+    local price = parseBoundedInteger(fields[6], 0, 4294967295)
+    local timestamp = parseBoundedInteger(fields[7], 0, 4294967295)
+
+    if not botName or not isValidStateToken(token) or slot == nil or itemId == nil or
+        count == nil or price == nil or timestamp == nil then
+      state.lastError = "BUYBACK_BAD_RESPONSE"
+      if type(active) == "table" then active.error = "BAD_RESPONSE" end
+      return true
+    end
+    if type(active) ~= "table" or active.token ~= token then
+      return true
+    end
+    if not active.begun or string.lower(botName) ~= active.botNameKey then
+      active.error = "RESPONSE_MISMATCH"
+      return true
+    end
+    if active.seenSlots[slot] then
+      active.error = "BAD_RESPONSE"
+      return true
+    end
+
+    active.seenSlots[slot] = true
+    table.insert(active.items, {
+      slot = slot,
+      itemId = itemId,
+      count = count,
+      price = price,
+      timestamp = timestamp,
+    })
+    state.connected = true
+    return true
+  end
+
+  if opcode == "BUYBACK_END" then
+    local fields = splitFields(payload)
+    local active = state.inventoryBuybackActive
+    if #fields ~= 5 then
+      state.lastError = "BUYBACK_BAD_RESPONSE"
+      if type(active) == "table" then
+        state.inventoryBuybackActive = nil
+        if MultiBot.OnBridgeInventoryBuybackList then
+          MultiBot.OnBridgeInventoryBuybackList(active.botName, {}, {
+            token = active.token or "",
+            status = "ERR",
+            reason = "BAD_RESPONSE",
+          })
+        end
+      end
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local count = parseBoundedInteger(fields[5], 0, 12)
+
+    if type(active) ~= "table" or active.token ~= token then
+      return true
+    end
+
+    local valid = botName ~= nil and isValidStateToken(token) and
+      (status == "OK" or status == "ERR") and reason ~= nil and count ~= nil and
+      string.lower(botName) == active.botNameKey
+    local items = active.items or {}
+
+    if valid and status == "OK" then
+      valid = active.begun == true and active.error == nil and
+        active.expectedCount == count and #items == count
+    elseif valid then
+      valid = count == 0
+      items = {}
+    end
+
+    if not valid then
+      status = "ERR"
+      reason = active.error or "RESPONSE_MISMATCH"
+      items = {}
+    end
+
+    table.sort(items, function(left, right)
+      local leftTime = tonumber(left.timestamp or 0) or 0
+      local rightTime = tonumber(right.timestamp or 0) or 0
+      if leftTime == rightTime then
+        return (tonumber(left.slot or 0) or 0) > (tonumber(right.slot or 0) or 0)
+      end
+      return leftTime > rightTime
+    end)
+
+    state.inventoryBuybackActive = nil
+    state.connected = true
+    state.lastError = status == "OK" and nil or ("BUYBACK_" .. tostring(reason or "UNKNOWN"))
+
+    if MultiBot.OnBridgeInventoryBuybackList then
+      MultiBot.OnBridgeInventoryBuybackList(active.botName, items, {
+        token = token,
+        status = status,
+        reason = reason or "UNKNOWN",
+      })
+    end
+    return true
+  end
+
+  if opcode == "BUYBACK_RESULT" then
+    local fields = splitFields(payload)
+    if #fields ~= 8 then
+      state.lastError = "BUYBACK_BAD_RESPONSE"
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local slot = parseBoundedInteger(fields[5], 74, 85)
+    local itemId = parseBoundedInteger(fields[6], 1, 4294967295)
+    local count = parseBoundedInteger(fields[7], 1, INVENTORY_BUYBACK_MAX_COUNT)
+    local price = parseBoundedInteger(fields[8], 0, 4294967295)
+    local command = state.inventoryBuybackCommands and state.inventoryBuybackCommands[token] or nil
+
+    if not botName or not isValidStateToken(token) or (status ~= "OK" and status ~= "ERR") or
+        not reason or slot == nil or itemId == nil or count == nil or price == nil then
+      state.lastError = "BUYBACK_BAD_RESPONSE"
+      if command then
+        state.inventoryBuybackCommands[token] = nil
+        if MultiBot.OnBridgeInventoryBuybackResult then
+          MultiBot.OnBridgeInventoryBuybackResult(
+            command.botName, "ERR", "BAD_RESPONSE",
+            command.slot, command.itemId, command.count, command.price, command
+          )
+        end
+      end
+      return true
+    end
+    if not command then
+      return true
+    end
+
+    local responseMatches = string.lower(botName) == command.botNameKey and
+      slot == command.slot and itemId == command.itemId and
+      count == command.count and price == command.price
+
+    state.inventoryBuybackCommands[token] = nil
+    if not responseMatches then
+      status = "ERR"
+      reason = "RESPONSE_MISMATCH"
+      state.lastError = "BUYBACK_RESPONSE_MISMATCH"
+    elseif status == "OK" then
+      state.lastError = nil
+    else
+      state.lastError = "BUYBACK_" .. reason
+    end
+
+    if MultiBot.OnBridgeInventoryBuybackResult then
+      MultiBot.OnBridgeInventoryBuybackResult(
+        command.botName, status, reason,
+        command.slot, command.itemId, command.count, command.price, command
+      )
+    end
+
+    debugPrint("ADDON:RX", "BUYBACK_RESULT", botName, token, status, reason, slot, itemId, count, price)
+    return true
+  end
+  return false
+end
+-- MB_VENDOR_BUYBACK_V1_RX_HELPER_END
+
+-- MB_SELFBOT_ACTION_V1_BEGIN
+function Comm.RunSelfAction(action, argument, callback)
+  local state = ensureBridgeState()
+  action = string.upper(trim(action or ""))
+  argument = trim(argument or "")
+
+  if not state.connected then
+    state.lastError = "SELF_ACTION_NOT_CONNECTED"
+    return false
+  end
+  if state.selfBotCapable ~= true then
+    state.lastError = "SELF_ACTION_SELF_BOT_CAPABILITY_UNAVAILABLE"
+    return false
+  end
+  if state.selfActionCapable ~= true then
+    state.lastError = "SELF_ACTION_CAPABILITY_UNAVAILABLE"
+    return false
+  end
+  if state.selfBotLastActive ~= true then
+    state.lastError = "SELF_ACTION_NOT_ACTIVE"
+    return false
+  end
+
+  local allowed = action == "AUTOGEAR"
+      or action == "MAINTENANCE"
+      or action == "WAIT_ATTACK_TIME"
+  if not allowed then
+    state.lastError = "SELF_ACTION_UNSUPPORTED"
+    return false
+  end
+
+  if (action == "AUTOGEAR" or action == "MAINTENANCE") and argument ~= "" then
+    state.lastError = "SELF_ACTION_BAD_ARGUMENT"
+    return false
+  end
+  if action == "WAIT_ATTACK_TIME"
+      and argument ~= "0"
+      and argument ~= "3"
+      and argument ~= "5"
+      and argument ~= "10" then
+    state.lastError = "SELF_ACTION_BAD_ARGUMENT"
+    return false
+  end
+
+  if countTableEntries(state.selfActionCommands) >= STRATEGY_MUTATION_MAX_ACTIVE then
+    state.lastError = "SELF_ACTION_TOO_MANY_REQUESTS"
+    return false
+  end
+
+  state.selfActionSeq = (tonumber(state.selfActionSeq) or 0) + 1
+  local token = tostring(math.floor(safeNow() * 1000)) .. "-self-action-" .. tostring(state.selfActionSeq)
+  state.selfActionCommands[token] = {
+    action = action,
+    argument = argument,
+    callback = type(callback) == "function" and callback or nil,
+    startedAt = safeNow(),
+  }
+
+  local payload = "SELF_ACTION~" .. token .. "~" .. action .. "~" .. argument
+  if not Comm.Send("RUN", payload) then
+    state.selfActionCommands[token] = nil
+    state.lastError = "SELF_ACTION_SEND_FAILED"
+    return false
+  end
+
+  if MultiBot and type(MultiBot.TimerAfter) == "function" then
+    MultiBot.TimerAfter(SELF_ACTION_TIMEOUT_SECONDS, function()
+      local bridge = ensureBridgeState()
+      local pending = bridge.selfActionCommands[token]
+      if type(pending) ~= "table" then
+        return
+      end
+
+      bridge.selfActionCommands[token] = nil
+      bridge.lastError = "SELF_ACTION_TIMEOUT"
+      if type(pending.callback) == "function" then
+        pending.callback({
+          status = "timeout",
+          action = pending.action,
+          reason = "TIMEOUT",
+        })
+      end
+    end)
+  end
+
+  return token
+end
+
+function Comm.HandleSelfActionAddonMessage(opcode, payload, state)
+  if opcode ~= "SELF_ACTION_ACK" then
+    return false
+  end
+
+  state = type(state) == "table" and state or ensureBridgeState()
+  local fields = splitFields(payload or "")
+  if #fields ~= 4 then
+    state.lastError = "SELF_ACTION_ACK_BAD_FIELD_COUNT"
+    return true
+  end
+
+  local token = trim(fields[1])
+  local action = string.upper(trim(fields[2]))
+  local status = string.upper(trim(fields[3]))
+  local reason = urlDecodeFieldStrict(fields[4], 96, true)
+  local pending = state.selfActionCommands[token]
+
+  if not isValidStateToken(token)
+      or (status ~= "OK" and status ~= "ERR")
+      or reason == nil
+      or type(pending) ~= "table"
+      or pending.action ~= action then
+    state.lastError = "SELF_ACTION_ACK_INVALID"
+    return true
+  end
+
+  state.selfActionCommands[token] = nil
+  state.connected = true
+  state.lastError = status == "OK" and nil or ("SELF_ACTION_" .. reason)
+  debugPrint("ADDON:RX", "SELF_ACTION_ACK", token, action, status, reason)
+
+  if type(pending.callback) == "function" then
+    pending.callback({
+      status = status == "OK" and "ok" or "failed",
+      action = action,
+      reason = reason,
+    })
+  end
+
+  return true
+end
+
+function Comm.HandleSelfActionProtocolError(requestType, token, reason, state)
+  if requestType ~= "SELF_ACTION" then
+    return false
+  end
+
+  state = type(state) == "table" and state or ensureBridgeState()
+  token = trim(token)
+  local pending = state.selfActionCommands[token]
+  if type(pending) ~= "table" then
+    return true
+  end
+
+  state.selfActionCommands[token] = nil
+  local failureReason = reason or "PROTOCOL_ERROR"
+  state.lastError = "SELF_ACTION_" .. failureReason
+  if type(pending.callback) == "function" then
+    pending.callback({
+      status = "error",
+      action = pending.action,
+      reason = failureReason,
+    })
+  end
+  return true
+end
+-- MB_SELFBOT_ACTION_V1_END
+-- MB_SELFBOT_STRATEGY_V1_RX_HELPER_BEGIN
+function Comm.HandleSelfStrategyAddonMessage(opcode, payload, state)
+  if opcode ~= "SELF_STRATEGY_ACK" then
+    return false
+  end
+
+  state = type(state) == "table" and state or ensureBridgeState()
+  local fields = splitFields(payload or "")
+  if #fields ~= 4 then
+    state.lastError = "SELF_STRATEGY_ACK_BAD_FIELD_COUNT"
+    return true
+  end
+
+  local token = trim(fields[1])
+  local stateScope = string.upper(trim(fields[2]))
+  local status = string.upper(trim(fields[3]))
+  local reason = urlDecodeFieldStrict(fields[4], 64, false)
+  local pending = state.selfStrategyCommands[token]
+
+  if not isValidStateToken(token)
+      or (stateScope ~= "C" and stateScope ~= "N")
+      or (status ~= "OK" and status ~= "ERR")
+      or reason == nil
+      or type(pending) ~= "table"
+      or pending.stateScope ~= stateScope then
+    state.lastError = "SELF_STRATEGY_ACK_INVALID"
+    return true
+  end
+
+  state.connected = true
+  state.lastError = status == "OK" and nil or ("SELF_STRATEGY_" .. reason)
+  debugPrint("ADDON:RX", "SELF_STRATEGY_ACK", token, stateScope, status, reason)
+  finishSelfStrategyCommand(token, {
+    status = status == "OK" and "ok" or "failed",
+    stateScope = stateScope,
+    reason = reason,
+  })
+  return true
+end
+
+function Comm.HandleSelfStrategyProtocolError(requestType, token, reason, state)
+  if requestType ~= "SELF_STRATEGY" then
+    return false
+  end
+
+  state = type(state) == "table" and state or ensureBridgeState()
+  token = trim(token)
+  local pending = state.selfStrategyCommands[token]
+  if type(pending) ~= "table" then
+    return true
+  end
+
+  finishSelfStrategyCommand(token, {
+    status = "error",
+    stateScope = pending.stateScope,
+    reason = reason or "PROTOCOL_ERROR",
+  })
+  return true
+end
+-- MB_SELFBOT_STRATEGY_V1_RX_HELPER_END
+function Comm.IsExpectedBridgeSender(sender)
+  local expectedSender = getPlayerName()
+  local senderName = trim(sender or "")
+  senderName = string.gsub(senderName, "%-.*$", "")
+  if not expectedSender or string.lower(senderName) ~= string.lower(expectedSender) then
+    debugPrint("ADDON:RX:DROP", "SENDER", sender or "")
+    return false
+  end
+
+  return true
+end
+
 function Comm.HandleAddonMessage(prefix, message, distribution, sender)
   if prefix ~= Comm.prefix then
     return false
+  end
+
+  if not Comm.IsExpectedBridgeSender(sender) then
+    return true
   end
 
   local state = ensureBridgeState()
   local opcode, payload = splitOnce(message or "", "~")
   opcode = string.upper(trim(opcode))
 
+  if opcode ~= "CAPS" and opcode ~= "CAPS_BEGIN" and opcode ~= "CAPS_END" then
+    maybeResolveCapabilityFallback(state.connectionGeneration)
+  end
+
   if opcode == "HELLO_ACK" then
     local protocol, serverName = splitOnce(payload, "~")
     local wasConnected = state.connected == true
+    local generation = state.connectionGeneration
 
     state.connected = true
     state.protocol = protocol ~= "" and protocol or nil
     state.server = serverName ~= "" and serverName or nil
     state.lastError = nil
     debugPrint("ADDON:RX", "HELLO_ACK", payload or "")
+    armCapabilityFallback(generation)
 
     if (not wasConnected or state.bootstrapPending) and state.protocol then
       safeDelay(0.10, function()
-        if MultiBot and MultiBot.bridge and MultiBot.bridge.connected then
-          state.bootstrapPending = false
-          state.bootstrapDeadline = 0
+        local bridge = ensureBridgeState()
+        if bridge.connectionGeneration == generation and bridge.connected then
+          bridge.bootstrapPending = false
+          bridge.bootstrapDeadline = 0
           if Comm.RequestRoster then
             Comm.RequestRoster()
           end
-          if Comm.RequestStates then
-            Comm.RequestStates()
-          end
+          requestBootstrapStates()
           if Comm.RequestBotDetails then
             Comm.RequestBotDetails()
           end
@@ -3250,21 +5629,136 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
     return true
   end
 
-  if opcode == "CAPS" then
+  if opcode == "CAPS_BEGIN" then
     state.stateFramingCapable = false
     state.strategyMutationCapable = false
+state.selfStrategyCapable = false
+state.selfActionCapable = false
+    state.outfitCapable = false
+    state.inventoryCapable = false
+    state.inventoryExactCapable = false
+    state.inventoryItemMoveCapable = false
+    state.inventoryItemEquipCapable = false
+    state.inventoryItemUnequipCapable = false
+    state.inventoryItemDestroyCapable = false
+    state.inventoryItemUseCapable = false
+    state.inventoryItemSellCapable = false
+    state.inventoryBuybackCapable = false
+    state.inventoryBulkSellCapable = false
+    state.inventoryOpenCapable = false
+    state.groupRollCapable = false
+    state.enchantTradeCapable = false
+    state.selfBotCapable = false
+    state.capabilityBatchActive = true
+    state.capabilitiesResolved = false
+    debugPrint("ADDON:RX", "CAPS_BEGIN")
+    return true
+  end
+
+  if opcode == "CAPS" then
+    if not state.capabilityBatchActive then
+      state.stateFramingCapable = false
+      state.strategyMutationCapable = false
+state.selfStrategyCapable = false
+state.selfActionCapable = false
+      state.outfitCapable = false
+      state.inventoryCapable = false
+      state.inventoryExactCapable = false
+      state.inventoryItemMoveCapable = false
+      state.inventoryItemEquipCapable = false
+      state.inventoryItemUnequipCapable = false
+      state.inventoryItemDestroyCapable = false
+      state.inventoryItemUseCapable = false
+      state.inventoryItemSellCapable = false
+      state.inventoryBuybackCapable = false
+      state.inventoryBulkSellCapable = false
+      state.inventoryOpenCapable = false
+      state.groupRollCapable = false
+      state.enchantTradeCapable = false
+      state.selfBotCapable = false
+    end
+
     for capability in string.gmatch(payload or "", "([^,]+)") do
       capability = trim(capability)
       if capability == STATE_FRAMING_CAPABILITY then
         state.stateFramingCapable = true
       elseif capability == STRATEGY_MUTATION_CAPABILITY then
         state.strategyMutationCapable = true
+      elseif capability == "SELF_STRATEGY_V1" then
+        state.selfStrategyCapable = true
+      elseif capability == SELF_ACTION_CAPABILITY then
+        state.selfActionCapable = true
+      elseif capability == OUTFIT_CAPABILITY then
+        state.outfitCapable = true
+      elseif capability == INVENTORY_CAPABILITY then
+        state.inventoryCapable = true
+      elseif capability == INVENTORY_EXACT_CAPABILITY then
+        state.inventoryExactCapable = true
+      elseif capability == INVENTORY_ITEM_MOVE_CAPABILITY then
+        state.inventoryItemMoveCapable = true
+      elseif capability == INVENTORY_ITEM_EQUIP_CAPABILITY then
+        state.inventoryItemEquipCapable = true
+      elseif capability == INVENTORY_ITEM_UNEQUIP_CAPABILITY then
+        state.inventoryItemUnequipCapable = true
+      elseif capability == INVENTORY_ITEM_DESTROY_CAPABILITY then
+        state.inventoryItemDestroyCapable = true
+      elseif capability == INVENTORY_ITEM_USE_CAPABILITY then
+        state.inventoryItemUseCapable = true
+      elseif capability == INVENTORY_ITEM_SELL_CAPABILITY then
+        state.inventoryItemSellCapable = true
+      elseif capability == "VENDOR_BUYBACK_V1" then
+        state.inventoryBuybackCapable = true
+      elseif capability == INVENTORY_BULK_SELL_CAPABILITY then
+        state.inventoryBulkSellCapable = true
+      elseif capability == INVENTORY_OPEN_CAPABILITY then
+        state.inventoryOpenCapable = true
+      elseif capability == GROUP_ROLL_CAPABILITY then
+        state.groupRollCapable = true
+      elseif capability == ENCHANT_TRADE_CAPABILITY then
+        state.enchantTradeCapable = true
+      elseif capability == "SELF_BOT_V1" then
+        state.selfBotCapable = true
       end
     end
+
+    if state.capabilityBatchActive then
+      debugPrint("ADDON:RX", "CAPS_PART", payload or "")
+      return true
+    end
+
+    state.capabilityFallbackDeadline = 0
+    state.capabilityFallbackGeneration = 0
+    state.capabilitiesResolved = true
     debugPrint("ADDON:RX", "CAPS", payload or "")
+    flushPendingStateRefreshes()
+    if state.selfBotCapable == true and type(Comm.RequestSelfBotState) == "function" then
+      Comm.RequestSelfBotState()
+    end
+    if MultiBot.RefreshEnchantingEveryButtons then
+      MultiBot.RefreshEnchantingEveryButtons()
+    end
     return true
   end
 
+  if opcode == "CAPS_END" then
+    if not state.capabilityBatchActive then
+      return true
+    end
+
+    state.capabilityBatchActive = false
+    state.capabilityFallbackDeadline = 0
+    state.capabilityFallbackGeneration = 0
+    state.capabilitiesResolved = true
+    debugPrint("ADDON:RX", "CAPS_END")
+    flushPendingStateRefreshes()
+    if state.selfBotCapable == true and type(Comm.RequestSelfBotState) == "function" then
+      Comm.RequestSelfBotState()
+    end
+    if MultiBot.RefreshEnchantingEveryButtons then
+      MultiBot.RefreshEnchantingEveryButtons()
+    end
+    return true
+  end
   if opcode == "WEAPON_ENCHANT" then
     state.connected = true
 
@@ -3316,6 +5810,24 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
 
     return true
   end
+
+  -- MB_ISSUE33_SELF_BOT_V1_RX_BEGIN
+  if Comm.HandleSelfBotAddonMessage(opcode, payload, state) then
+    return true
+  end
+  -- MB_ISSUE33_SELF_BOT_V1_RX_END
+
+  -- MB_SELFBOT_ACTION_V1_RX_BEGIN
+  if Comm.HandleSelfActionAddonMessage(opcode, payload, state) then
+    return true
+  end
+  -- MB_SELFBOT_ACTION_V1_RX_END
+
+  -- MB_SELFBOT_STRATEGY_V1_RX_BEGIN
+  if Comm.HandleSelfStrategyAddonMessage(opcode, payload, state) then
+    return true
+  end
+  -- MB_SELFBOT_STRATEGY_V1_RX_END
 
   if opcode == "ROSTER" then
     state.connected = true
@@ -3576,12 +6088,190 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
     return Comm.ApplyGameObjectDonePayload(payload)
   end
 
+  if opcode == "INV_EXACT_BEGIN" then
+    local botName, token = splitOnce(payload or "", "~")
+    state.connected = true
+    state.lastError = nil
+
+    local active = getActiveInventoryExactRequest(botName, token)
+    if active then
+      if active.begun then
+        active.integrityError = "DUPLICATE_BEGIN"
+        state.lastError = "INV_EXACT_DUPLICATE_BEGIN"
+      else
+        active.begun = true
+        active.integrityError = nil
+        active.bags = {}
+        active.items = {}
+        active.itemsByPosition = {}
+      end
+    end
+
+    return true
+  end
+
+  if opcode == "INV_BAG" then
+    local fields = splitFields(payload or "")
+    state.connected = true
+    state.lastError = nil
+
+    if #fields ~= 7 then
+      local active = #fields >= 2 and getActiveInventoryExactRequest(trim(fields[1]), trim(fields[2])) or nil
+      if active then
+        active.integrityError = "INV_BAG_BAD_FIELD_COUNT"
+      end
+      state.lastError = "INV_BAG_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = trim(fields[1])
+    local token = trim(fields[2])
+    local kind = trim(fields[3])
+    local bag = isWholeNumberInRange(fields[4], 0, 255)
+    local slotStart = isWholeNumberInRange(fields[5], 0, 255)
+    local slotCount = isWholeNumberInRange(fields[6], 0, 255)
+    local bagItemId = isWholeNumberInRange(fields[7], 0, 4294967295)
+    local active = getActiveInventoryExactRequest(botName, token)
+
+    if not active then
+      return true
+    end
+    if not active.begun then
+      active.integrityError = "FRAME_BEFORE_BEGIN"
+      state.lastError = "INV_BAG_BEFORE_BEGIN"
+      return true
+    end
+
+    if (kind ~= "BACKPACK" and kind ~= "BAG" and kind ~= "KEYRING")
+        or bag == nil or slotStart == nil or slotCount == nil or bagItemId == nil then
+      active.integrityError = "INV_BAG_BAD_FIELDS"
+      state.lastError = "INV_BAG_BAD_FIELDS"
+      return true
+    end
+
+    local entry = {
+      kind = kind,
+      bag = bag,
+      slotStart = slotStart,
+      slotCount = slotCount,
+      itemId = bagItemId,
+    }
+    table.insert(active.bags, entry)
+    return true
+  end
+
+  if opcode == "INV_ITEM_LOC" then
+    local fields = splitFields(payload or "")
+    state.connected = true
+    state.lastError = nil
+
+    if #fields ~= 7 then
+      local active = #fields >= 2 and getActiveInventoryExactRequest(trim(fields[1]), trim(fields[2])) or nil
+      if active then
+        active.integrityError = "INV_ITEM_LOC_BAD_FIELD_COUNT"
+      end
+      state.lastError = "INV_ITEM_LOC_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = trim(fields[1])
+    local token = trim(fields[2])
+    local bag = isWholeNumberInRange(fields[3], 0, 255)
+    local slot = isWholeNumberInRange(fields[4], 0, 255)
+    local itemId = isWholeNumberInRange(fields[5], 1, 4294967295)
+    local count = isWholeNumberInRange(fields[6], 1, 4294967295)
+    local soulbound = trim(fields[7])
+    local active = getActiveInventoryExactRequest(botName, token)
+
+    if not active then
+      return true
+    end
+    if not active.begun then
+      active.integrityError = "FRAME_BEFORE_BEGIN"
+      state.lastError = "INV_ITEM_LOC_BEFORE_BEGIN"
+      return true
+    end
+
+    if bag == nil or slot == nil or itemId == nil or count == nil or (soulbound ~= "0" and soulbound ~= "1") then
+      active.integrityError = "INV_ITEM_LOC_BAD_FIELDS"
+      state.lastError = "INV_ITEM_LOC_BAD_FIELDS"
+      return true
+    end
+
+    local positionKey = tostring(bag) .. ":" .. tostring(slot)
+    if active.itemsByPosition[positionKey] then
+      active.integrityError = "DUPLICATE_ITEM_POSITION"
+      state.lastError = "INV_ITEM_LOC_DUPLICATE_POSITION"
+      return true
+    end
+
+    local item = {
+      bag = bag,
+      slot = slot,
+      itemId = itemId,
+      count = count,
+      soulbound = soulbound == "1",
+    }
+    table.insert(active.items, item)
+    active.itemsByPosition[positionKey] = item
+    return true
+  end
+
+  if opcode == "INV_EXACT_ERROR" then
+    local botName, rest = splitOnce(payload or "", "~")
+    local token, reason = splitOnce(rest or "", "~")
+    state.connected = true
+
+    local active = getActiveInventoryExactRequest(botName, token)
+    if active then
+      if not active.begun then
+        active.integrityError = "FRAME_BEFORE_BEGIN"
+        state.lastError = "INV_EXACT_ERROR_BEFORE_BEGIN"
+      else
+        reason = trim(reason)
+        active.integrityError = reason ~= "" and reason or "FAILED"
+        state.lastError = "INV_EXACT_" .. active.integrityError
+      end
+    end
+    return true
+  end
+
+  if opcode == "INV_EXACT_END" then
+    local botName, token = splitOnce(payload or "", "~")
+    state.connected = true
+
+    local active = getActiveInventoryExactRequest(botName, token)
+    if active and active.begun and not active.integrityError then
+      local snapshot = {
+        botName = active.botName,
+        token = active.token,
+        receivedAt = safeNow(),
+        bags = active.bags or {},
+        items = active.items or {},
+        itemsByPosition = active.itemsByPosition or {},
+      }
+      state.inventoryExactSnapshots[active.botNameKey] = snapshot
+      state.lastError = nil
+
+      if MultiBot.OnBridgeInventoryExactSnapshot then
+        MultiBot.OnBridgeInventoryExactSnapshot(active.botName, snapshot)
+      end
+    elseif active then
+      state.lastError = "INV_EXACT_" .. tostring(active.integrityError or "INCOMPLETE")
+    end
+
+    clearActiveInventoryExactRequest(botName, token)
+    return true
+  end
+
   if opcode == "INV_BEGIN" then
     local botName, token = splitOnce(payload or "", "~")
     state.connected = true
     state.lastError = nil
 
-    if getActiveInventoryRequest(botName, token) then
+    local active = getActiveInventoryRequest(botName, token)
+    if active then
+      active.begun = true
       local inventory = getInventoryFrame()
       if inventory and inventory.beginPayload then
         inventory:beginPayload(trim(botName))
@@ -3654,6 +6344,9 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
         if itemsFrame.updateLayout then
           itemsFrame:updateLayout()
         end
+      end
+      if inventory and inventory.endPayload then
+        inventory:endPayload(trim(botName))
       end
     end
 
@@ -3818,6 +6511,395 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
     return true
   end
 
+  if opcode == "INVENTORY_ITEM_MOVE" then
+    local fields = splitFields(payload)
+    if #fields ~= 8 then
+      state.lastError = "ITEM_MOVE_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local srcBag = parseBoundedInteger(fields[5], 0, 255)
+    local srcSlot = parseBoundedInteger(fields[6], 0, 255)
+    local dstBag = parseBoundedInteger(fields[7], 0, 255)
+    local dstSlot = parseBoundedInteger(fields[8], 0, 255)
+
+    state.connected = true
+    local command = state.inventoryItemMoves and state.inventoryItemMoves[token] or nil
+    if not botName or not isValidStateToken(token) or (status ~= "OK" and status ~= "ERR") or not reason or
+      srcBag == nil or srcSlot == nil or dstBag == nil or dstSlot == nil then
+      state.lastError = "ITEM_MOVE_BAD_RESPONSE"
+      if command then
+        state.inventoryItemMoves[token] = nil
+        if MultiBot.OnBridgeInventoryItemMoveResult then
+          MultiBot.OnBridgeInventoryItemMoveResult(
+            command.botName, "ERR", "BAD_RESPONSE",
+            command.srcBag, command.srcSlot, command.dstBag, command.dstSlot, command
+          )
+        end
+      end
+      return true
+    end
+
+    if not command then
+      return true
+    end
+
+    local responseMatches = string.lower(botName) == command.botNameKey and
+      srcBag == command.srcBag and srcSlot == command.srcSlot and
+      dstBag == command.dstBag and dstSlot == command.dstSlot
+
+    state.inventoryItemMoves[token] = nil
+    if not responseMatches then
+      status = "ERR"
+      reason = "RESPONSE_MISMATCH"
+      state.lastError = "ITEM_MOVE_RESPONSE_MISMATCH"
+    elseif status == "OK" then
+      state.lastError = nil
+    else
+      state.lastError = "ITEM_MOVE_" .. reason
+    end
+
+    if MultiBot.OnBridgeInventoryItemMoveResult then
+      MultiBot.OnBridgeInventoryItemMoveResult(
+        command.botName, status, reason,
+        command.srcBag, command.srcSlot, command.dstBag, command.dstSlot, command
+      )
+    end
+
+    debugPrint("ADDON:RX", "INVENTORY_ITEM_MOVE", botName, token, status, reason, srcBag, srcSlot, dstBag, dstSlot)
+    return true
+  end
+
+  if opcode == "INVENTORY_ITEM_EQUIP" then
+    local fields = splitFields(payload)
+    if #fields ~= 7 then
+      state.lastError = "ITEM_EQUIP_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local srcBag = parseBoundedInteger(fields[5], 0, 255)
+    local srcSlot = parseBoundedInteger(fields[6], 0, 255)
+    local dstSlot = parseBoundedInteger(fields[7], 0, 255)
+
+    state.connected = true
+    local command = state.inventoryItemEquips and state.inventoryItemEquips[token] or nil
+    if not botName or not isValidStateToken(token) or (status ~= "OK" and status ~= "ERR") or not reason or
+      srcBag == nil or srcSlot == nil or dstSlot == nil then
+      state.lastError = "ITEM_EQUIP_BAD_RESPONSE"
+      if command then
+        state.inventoryItemEquips[token] = nil
+        if MultiBot.OnBridgeInventoryItemEquipResult then
+          MultiBot.OnBridgeInventoryItemEquipResult(
+            command.botName, "ERR", "BAD_RESPONSE",
+            command.srcBag, command.srcSlot, command.dstSlot, command
+          )
+        end
+        if Comm.RequestInventoryExact then
+          Comm.RequestInventoryExact(command.botName)
+        end
+      end
+      return true
+    end
+
+    if not command then
+      return true
+    end
+
+    local responseMatches = string.lower(botName) == command.botNameKey and
+      srcBag == command.srcBag and srcSlot == command.srcSlot
+
+    state.inventoryItemEquips[token] = nil
+    if not responseMatches then
+      status = "ERR"
+      reason = "RESPONSE_MISMATCH"
+      state.lastError = "ITEM_EQUIP_RESPONSE_MISMATCH"
+    elseif status == "OK" then
+      state.lastError = nil
+    else
+      state.lastError = "ITEM_EQUIP_" .. reason
+    end
+
+    if MultiBot.OnBridgeInventoryItemEquipResult then
+      MultiBot.OnBridgeInventoryItemEquipResult(
+        command.botName, status, reason,
+        command.srcBag, command.srcSlot, dstSlot, command
+      )
+    end
+
+    if status == "OK" then
+      local refreshed = MultiBot.RequestInventoryRefresh
+        and MultiBot.RequestInventoryRefresh(command.botName, 0.30)
+      if not refreshed and Comm.RequestInventoryExact then
+        Comm.RequestInventoryExact(command.botName)
+      end
+    elseif Comm.RequestInventoryExact then
+      Comm.RequestInventoryExact(command.botName)
+    end
+
+    debugPrint("ADDON:RX", "INVENTORY_ITEM_EQUIP", botName, token, status, reason, srcBag, srcSlot, dstSlot)
+    return true
+  end
+
+  if opcode == "INVENTORY_ITEM_UNEQUIP" then
+    local fields = splitFields(payload)
+    if #fields ~= 6 then
+      state.lastError = "ITEM_UNEQUIP_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local srcSlot = parseBoundedInteger(fields[5], 0, 18)
+    local srcItemId = parseBoundedInteger(fields[6], 1, 4294967295)
+
+    state.connected = true
+    local command = state.inventoryItemUnequips and state.inventoryItemUnequips[token] or nil
+    if not botName or not isValidStateToken(token) or (status ~= "OK" and status ~= "ERR") or not reason or
+      srcSlot == nil or srcItemId == nil then
+      state.lastError = "ITEM_UNEQUIP_BAD_RESPONSE"
+      if command then
+        state.inventoryItemUnequips[token] = nil
+        if MultiBot.OnBridgeInventoryItemUnequipResult then
+          MultiBot.OnBridgeInventoryItemUnequipResult(
+            command.botName, "ERR", "BAD_RESPONSE", command.srcSlot, command.srcItemId, command
+          )
+        end
+      end
+      return true
+    end
+
+    if not command then
+      return true
+    end
+
+    local responseMatches = string.lower(botName) == command.botNameKey and
+      srcSlot == command.srcSlot and srcItemId == command.srcItemId
+
+    state.inventoryItemUnequips[token] = nil
+    if not responseMatches then
+      status = "ERR"
+      reason = "RESPONSE_MISMATCH"
+      state.lastError = "ITEM_UNEQUIP_RESPONSE_MISMATCH"
+    elseif status == "OK" then
+      state.lastError = nil
+    else
+      state.lastError = "ITEM_UNEQUIP_" .. reason
+    end
+
+    if MultiBot.OnBridgeInventoryItemUnequipResult then
+      MultiBot.OnBridgeInventoryItemUnequipResult(
+        command.botName, status, reason, command.srcSlot, command.srcItemId, command
+      )
+    end
+
+    debugPrint("ADDON:RX", "INVENTORY_ITEM_UNEQUIP", botName, token, status, reason, srcSlot, srcItemId)
+    return true
+  end
+
+  -- MB_ITEM_SELL_SINGLE_V1_RX_BEGIN
+  if opcode == "INVENTORY_ITEM_SELL" then
+    local fields = splitFields(payload)
+    if #fields ~= 8 then
+      state.lastError = "ITEM_SELL_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local srcBag = parseBoundedInteger(fields[5], 0, 255)
+    local srcSlot = parseBoundedInteger(fields[6], 0, 255)
+    local srcItemId = parseBoundedInteger(fields[7], 1, 4294967295)
+    local soldCount = parseBoundedInteger(fields[8], 0, INVENTORY_ITEM_SELL_MAX_COUNT)
+
+    state.connected = true
+    local command = state.inventoryItemSells and state.inventoryItemSells[token] or nil
+    if not botName or not isValidStateToken(token) or (status ~= "OK" and status ~= "ERR") or not reason or
+      srcBag == nil or srcSlot == nil or srcItemId == nil or soldCount == nil then
+      state.lastError = "ITEM_SELL_BAD_RESPONSE"
+      if command then
+        state.inventoryItemSells[token] = nil
+        if MultiBot.OnBridgeInventoryItemSellResult then
+          MultiBot.OnBridgeInventoryItemSellResult(
+            command.botName, "ERR", "BAD_RESPONSE",
+            command.srcBag, command.srcSlot, command.srcItemId, 0, command
+          )
+        end
+      end
+      return true
+    end
+
+    if not command then
+      return true
+    end
+
+    local responseMatches = string.lower(botName) == command.botNameKey and
+      srcBag == command.srcBag and srcSlot == command.srcSlot and srcItemId == command.srcItemId and
+      soldCount <= command.srcCount and
+      ((status == "OK" and soldCount >= 1) or (status == "ERR" and soldCount == 0))
+
+    state.inventoryItemSells[token] = nil
+    if not responseMatches then
+      status = "ERR"
+      reason = "RESPONSE_MISMATCH"
+      soldCount = 0
+      state.lastError = "ITEM_SELL_RESPONSE_MISMATCH"
+    elseif status == "OK" then
+      state.lastError = nil
+    else
+      state.lastError = "ITEM_SELL_" .. reason
+    end
+
+    if MultiBot.OnBridgeInventoryItemSellResult then
+      MultiBot.OnBridgeInventoryItemSellResult(
+        command.botName, status, reason,
+        command.srcBag, command.srcSlot, command.srcItemId, soldCount, command
+      )
+    end
+
+    debugPrint("ADDON:RX", "INVENTORY_ITEM_SELL", botName, token, status, reason, srcBag, srcSlot, srcItemId, soldCount)
+    return true
+  end
+  -- MB_ITEM_SELL_SINGLE_V1_RX_END
+  -- MB_VENDOR_BUYBACK_V1_RX_DISPATCH_BEGIN
+  if Comm.HandleInventoryBuybackAddonMessage(opcode, payload, state) then
+    return true
+  end
+  -- MB_VENDOR_BUYBACK_V1_RX_DISPATCH_END
+
+
+  if opcode == "INVENTORY_ITEM_USE" then
+    local fields = splitFields(payload)
+    if #fields ~= 7 then
+      state.lastError = "ITEM_USE_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local srcBag = parseBoundedInteger(fields[5], 0, 255)
+    local srcSlot = parseBoundedInteger(fields[6], 0, 255)
+    local srcItemId = parseBoundedInteger(fields[7], 1, 4294967295)
+
+    state.connected = true
+    local command = state.inventoryItemUses and state.inventoryItemUses[token] or nil
+    if not botName or not isValidStateToken(token) or (status ~= "OK" and status ~= "ERR") or not reason or
+      srcBag == nil or srcSlot == nil or srcItemId == nil then
+      state.lastError = "ITEM_USE_BAD_RESPONSE"
+      if command then
+        state.inventoryItemUses[token] = nil
+        if MultiBot.OnBridgeInventoryItemUseResult then
+          MultiBot.OnBridgeInventoryItemUseResult(
+            command.botName, "ERR", "BAD_RESPONSE",
+            command.srcBag, command.srcSlot, command.srcItemId, command
+          )
+        end
+      end
+      return true
+    end
+
+    if not command then
+      return true
+    end
+
+    local responseMatches = string.lower(botName) == command.botNameKey and
+      srcBag == command.srcBag and srcSlot == command.srcSlot and srcItemId == command.srcItemId
+
+    state.inventoryItemUses[token] = nil
+    if not responseMatches then
+      status = "ERR"
+      reason = "RESPONSE_MISMATCH"
+      state.lastError = "ITEM_USE_RESPONSE_MISMATCH"
+    elseif status == "OK" then
+      state.lastError = nil
+    else
+      state.lastError = "ITEM_USE_" .. reason
+    end
+
+    if MultiBot.OnBridgeInventoryItemUseResult then
+      MultiBot.OnBridgeInventoryItemUseResult(
+        command.botName, status, reason,
+        command.srcBag, command.srcSlot, command.srcItemId, command
+      )
+    end
+
+    debugPrint("ADDON:RX", "INVENTORY_ITEM_USE", botName, token, status, reason, srcBag, srcSlot, srcItemId)
+    return true
+  end
+
+  if opcode == "INVENTORY_ITEM_DESTROY" then
+    local fields = splitFields(payload)
+    if #fields ~= 7 then
+      state.lastError = "ITEM_DESTROY_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = urlDecodeFieldStrict(fields[1], 64, false)
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = urlDecodeFieldStrict(fields[4], 64, false)
+    local srcBag = parseBoundedInteger(fields[5], 0, 255)
+    local srcSlot = parseBoundedInteger(fields[6], 0, 255)
+    local srcItemId = parseBoundedInteger(fields[7], 1, 4294967295)
+
+    state.connected = true
+    local command = state.inventoryItemDestroys and state.inventoryItemDestroys[token] or nil
+    if not botName or not isValidStateToken(token) or (status ~= "OK" and status ~= "ERR") or not reason or
+      srcBag == nil or srcSlot == nil or srcItemId == nil then
+      state.lastError = "ITEM_DESTROY_BAD_RESPONSE"
+      if command then
+        state.inventoryItemDestroys[token] = nil
+        if MultiBot.OnBridgeInventoryItemDestroyResult then
+          MultiBot.OnBridgeInventoryItemDestroyResult(
+            command.botName, "ERR", "BAD_RESPONSE",
+            command.srcBag, command.srcSlot, command.srcItemId, command
+          )
+        end
+      end
+      return true
+    end
+
+    if not command then
+      return true
+    end
+
+    local responseMatches = string.lower(botName) == command.botNameKey and
+      srcBag == command.srcBag and srcSlot == command.srcSlot and srcItemId == command.srcItemId
+
+    state.inventoryItemDestroys[token] = nil
+    if not responseMatches then
+      status = "ERR"
+      reason = "RESPONSE_MISMATCH"
+      state.lastError = "ITEM_DESTROY_RESPONSE_MISMATCH"
+    elseif status == "OK" then
+      state.lastError = nil
+    else
+      state.lastError = "ITEM_DESTROY_" .. reason
+    end
+
+    if MultiBot.OnBridgeInventoryItemDestroyResult then
+      MultiBot.OnBridgeInventoryItemDestroyResult(
+        command.botName, status, reason,
+        command.srcBag, command.srcSlot, command.srcItemId, command
+      )
+    end
+
+    debugPrint("ADDON:RX", "INVENTORY_ITEM_DESTROY", botName, token, status, reason, srcBag, srcSlot, srcItemId)
+    return true
+  end
   if opcode == "INVENTORY_ITEM_ACTION" then
     local botName, rest = splitOnce(payload or "", "~")
     local token, rest2 = splitOnce(rest or "", "~")
@@ -4106,6 +7188,274 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
         MultiBot.OnBridgeBotEmblems(botName, state.botEmblems[key], token, state.botEmblemMoney[key])
       end
       state.botEmblemActive = nil
+    end
+
+    return true
+  end
+
+  if opcode == "ENCHANT_TRADE_BEGIN" then
+    local fields = splitFields(payload or "")
+    if #fields ~= 6 then
+      state.lastError = "ENCHANT_TRADE_BEGIN_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = trim(urlDecodeField(fields[1]))
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = string.upper(trim(urlDecodeField(fields[4])))
+    local skillValue = tonumber(fields[5] or "0") or 0
+    local maxSkill = tonumber(fields[6] or "0") or 0
+    state.connected = true
+    state.lastError = nil
+
+    local active = getActiveEnchantTradeRequest(botName, token)
+    if active then
+      if active.began then
+        active.integrityError = active.integrityError or "DUPLICATE_BEGIN"
+        state.lastError = "ENCHANT_TRADE_DUPLICATE_BEGIN"
+      else
+        active.began = true
+        active.status = status
+        active.reason = reason
+        active.skillValue = skillValue
+        active.maxSkill = maxSkill
+        active.items = {}
+        active.itemBySpellId = {}
+        markEnchantTradeListProgress(active)
+      end
+    end
+
+    return true
+  end
+
+  if opcode == "ENCHANT_TRADE_ITEM" then
+    local fields = splitFields(payload or "")
+    if #fields ~= 7 then
+      state.lastError = "ENCHANT_TRADE_ITEM_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = trim(urlDecodeField(fields[1]))
+    local token = trim(fields[2])
+    local spellId = tonumber(fields[3] or "0") or 0
+    local difficulty = trim(urlDecodeField(fields[4]))
+    local available = tonumber(fields[5] or "0") or 0
+    local hasTools = tonumber(fields[6] or "0") or 0
+    local materialCount = tonumber(fields[7] or "")
+    state.connected = true
+    state.lastError = nil
+
+    local active = getActiveEnchantTradeRequest(botName, token)
+    if active then
+      if not active.began then
+        active.integrityError = active.integrityError or "MISSING_BEGIN"
+        state.lastError = "ENCHANT_TRADE_ITEM_BEFORE_BEGIN"
+      elseif spellId <= 0 or materialCount == nil or materialCount < 0 or materialCount > 256 then
+        active.integrityError = active.integrityError or "BAD_ITEM"
+        state.lastError = "ENCHANT_TRADE_ITEM_INVALID"
+      else
+        active.itemBySpellId = active.itemBySpellId or {}
+        if active.itemBySpellId[spellId] then
+          active.integrityError = active.integrityError or "DUPLICATE_SPELL_ID"
+          state.lastError = "ENCHANT_TRADE_DUPLICATE_SPELL_ID"
+        else
+          local entry = {
+            spellId = spellId,
+            difficulty = difficulty,
+            available = available ~= 0 and 1 or 0,
+            materials = {},
+            hasTools = hasTools ~= 0 and 1 or 0,
+            expectedMaterialCount = materialCount,
+            receivedMaterialCount = 0,
+            materialIndexes = {},
+          }
+          table.insert(active.items, entry)
+          active.itemBySpellId[spellId] = entry
+          markEnchantTradeListProgress(active)
+        end
+      end
+    end
+
+    return true
+  end
+
+  if opcode == "ENCHANT_TRADE_MATERIAL" then
+    local fields = splitFields(payload or "")
+    if #fields ~= 7 then
+      state.lastError = "ENCHANT_TRADE_MATERIAL_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = trim(urlDecodeField(fields[1]))
+    local token = trim(fields[2])
+    local spellId = tonumber(fields[3] or "0") or 0
+    local materialIndex = tonumber(fields[4] or "0") or 0
+    local itemId = tonumber(fields[5] or "0") or 0
+    local required = tonumber(fields[6] or "0") or 0
+    local available = tonumber(fields[7] or "0") or 0
+    state.connected = true
+    state.lastError = nil
+
+    local active = getActiveEnchantTradeRequest(botName, token)
+    if active then
+      if not active.began then
+        active.integrityError = active.integrityError or "MISSING_BEGIN"
+        state.lastError = "ENCHANT_TRADE_MATERIAL_BEFORE_BEGIN"
+      else
+        local entry = active.itemBySpellId and active.itemBySpellId[spellId] or nil
+        if not entry then
+          active.integrityError = active.integrityError or "MATERIAL_WITHOUT_ITEM"
+          state.lastError = "ENCHANT_TRADE_MATERIAL_WITHOUT_ITEM"
+        else
+          local expectedMaterialCount = tonumber(entry.expectedMaterialCount or 0) or 0
+          entry.materialIndexes = entry.materialIndexes or {}
+          if materialIndex <= 0 or materialIndex > expectedMaterialCount then
+            active.integrityError = active.integrityError or "MATERIAL_INDEX_OUT_OF_RANGE"
+            state.lastError = "ENCHANT_TRADE_MATERIAL_INDEX_OUT_OF_RANGE"
+          elseif entry.materialIndexes[materialIndex] then
+            active.integrityError = active.integrityError or "DUPLICATE_MATERIAL_INDEX"
+            state.lastError = "ENCHANT_TRADE_DUPLICATE_MATERIAL_INDEX"
+          elseif itemId <= 0 or required <= 0 then
+            active.integrityError = active.integrityError or "BAD_MATERIAL"
+            state.lastError = "ENCHANT_TRADE_MATERIAL_INVALID"
+          else
+            entry.materials[materialIndex] = {
+              itemId = itemId,
+              required = required,
+              available = available,
+            }
+            entry.materialIndexes[materialIndex] = true
+            entry.receivedMaterialCount = (tonumber(entry.receivedMaterialCount or 0) or 0) + 1
+            markEnchantTradeListProgress(active)
+          end
+        end
+      end
+    end
+
+    return true
+  end
+
+  if opcode == "ENCHANT_TRADE_END" then
+    local fields = splitFields(payload or "")
+    if #fields ~= 5 then
+      state.lastError = "ENCHANT_TRADE_END_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = trim(urlDecodeField(fields[1]))
+    local token = trim(fields[2])
+    local status = string.upper(trim(fields[3]))
+    local reason = string.upper(trim(urlDecodeField(fields[4])))
+    local count = tonumber(fields[5] or "0") or 0
+    state.connected = true
+    state.lastError = nil
+
+    local active = getActiveEnchantTradeRequest(botName, token)
+    if active then
+      active.status = status
+      active.reason = reason
+      active.count = count
+
+      local items = active.items or {}
+      local deliveredItems = items
+      local integrityError = active.integrityError
+
+      if not active.began then
+        integrityError = integrityError or "MISSING_BEGIN"
+      end
+
+      if status == "OK" and not integrityError and #items ~= count then
+        integrityError = "COUNT_MISMATCH"
+      end
+
+      if status == "OK" and not integrityError then
+        for _, entry in ipairs(items) do
+          local expectedMaterialCount = tonumber(entry.expectedMaterialCount or 0) or 0
+          local receivedMaterialCount = tonumber(entry.receivedMaterialCount or 0) or 0
+          if receivedMaterialCount ~= expectedMaterialCount then
+            integrityError = "MATERIAL_COUNT_MISMATCH"
+            break
+          end
+
+          for materialIndex = 1, expectedMaterialCount do
+            if not entry.materialIndexes or not entry.materialIndexes[materialIndex] then
+              integrityError = "MATERIAL_INDEX_GAP"
+              break
+            end
+          end
+
+          if integrityError then
+            break
+          end
+        end
+      end
+
+      if integrityError then
+        status = "ERR"
+        reason = "TRY_AGAIN"
+        active.status = status
+        active.reason = reason
+        state.lastError = "ENCHANT_TRADE_" .. integrityError
+        deliveredItems = {}
+      elseif status == "OK" then
+        local key = string.lower(active.botName or botName)
+        state.enchantTradeLists[key] = items
+      end
+
+      state.enchantTradeActive = nil
+
+      if MultiBot.OnBridgeEnchantTradeList then
+        MultiBot.OnBridgeEnchantTradeList(active.botName or botName, deliveredItems, {
+          token = active.token or token,
+          status = status,
+          reason = reason,
+          skillValue = active.skillValue or 0,
+          maxSkill = active.maxSkill or 0,
+          count = count,
+        })
+      end
+    end
+
+    return true
+  end
+
+  if opcode == "ENCHANT_TRADE_RESULT" then
+    local fields = splitFields(payload or "")
+    if #fields ~= 6 then
+      state.lastError = "ENCHANT_TRADE_RESULT_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local botName = trim(urlDecodeField(fields[1]))
+    local token = trim(fields[2])
+    local spellId = tonumber(fields[3] or "0") or 0
+    local status = string.upper(trim(fields[4]))
+    local reason = string.upper(trim(urlDecodeField(fields[5])))
+    local accepted = tonumber(fields[6] or "0") or 0
+    state.connected = true
+    state.lastError = nil
+
+    local command = state.enchantTradeCommands and state.enchantTradeCommands[token] or nil
+    if command then
+      if botName == "" or string.lower(botName) ~= tostring(command.botNameKey or "") then
+        state.lastError = "ENCHANT_TRADE_RESULT_BOT_MISMATCH"
+        return true
+      end
+
+      if spellId <= 0 or spellId ~= tonumber(command.spellId or 0) then
+        state.lastError = "ENCHANT_TRADE_RESULT_SPELL_MISMATCH"
+        return true
+      end
+
+      state.enchantTradeCommands[token] = nil
+      command.accepted = accepted ~= 0
+      command.status = status
+      command.reason = reason
+
+      if MultiBot.OnBridgeEnchantTradeResult then
+        MultiBot.OnBridgeEnchantTradeResult(command.botName, command.spellId, status, reason, command)
+      end
     end
 
     return true
@@ -4430,6 +7780,52 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
     return true
   end
 
+  if opcode == "GROUP_ROLL_ACK" then
+    local fields = splitFields(payload or "")
+    if #fields ~= 7 then
+      state.lastError = "GROUP_ROLL_ACK_BAD_FIELD_COUNT"
+      return true
+    end
+
+    local token = trim(fields[1])
+    local status = string.upper(trim(fields[2]))
+    local mode = string.upper(trim(fields[3]))
+    local scope = string.upper(trim(fields[4]))
+    local matched = parseBoundedInteger(fields[5], 0, 128)
+    local invoked = parseBoundedInteger(fields[6], 0, 128)
+    local reason = urlDecodeFieldStrict(fields[7], 64, false)
+    local pending = state.groupRollCommands[token]
+
+    if not isValidStateToken(token)
+        or (status ~= "OK" and status ~= "ERR")
+        or (mode ~= "NORMAL" and mode ~= "ITEM")
+        or (scope ~= "PARTY" and scope ~= "RAID" and scope ~= "NONE")
+        or matched == nil
+        or invoked == nil
+        or invoked > matched
+        or reason == nil
+        or type(pending) ~= "table"
+        or pending.mode ~= mode then
+      state.lastError = "GROUP_ROLL_ACK_INVALID"
+      return true
+    end
+
+    state.connected = true
+    state.lastError = nil
+    debugPrint("ADDON:RX", "GROUP_ROLL_ACK", payload or "")
+
+    finishGroupRollCommand(token, {
+      status = status == "OK" and "ok" or "error",
+      mode = mode,
+      scope = scope,
+      matched = matched,
+      invoked = invoked,
+      reason = reason,
+    })
+
+    return true
+  end
+
   if opcode == "ERR" then
     state.lastError = payload
     debugPrint("ADDON:RX", "ERR", payload or "")
@@ -4442,7 +7838,20 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
 
       requestType = requestType and string.upper(trim(requestType)) or nil
       if requestType and isValidStateToken(token) and reason then
-        if requestType == "STRATEGY" and state.strategyMutationCommands[token] then
+        if Comm.HandleSelfBotProtocolError(requestType, token, reason, state) then
+          return true
+        elseif Comm.HandleSelfActionProtocolError(requestType, token, reason, state) then
+          return true
+        elseif Comm.HandleSelfStrategyProtocolError(requestType, token, reason, state) then
+          return true
+        elseif requestType == "GROUP_ROLL" and state.groupRollCommands[token] then
+          finishGroupRollCommand(token, {
+            status = "error",
+            matched = 0,
+            invoked = 0,
+            reason = reason,
+          })
+        elseif requestType == "STRATEGY" and state.strategyMutationCommands[token] then
           finishStrategyMutationCommand(token, {
             status = "error",
             matched = 0,
@@ -4450,7 +7859,8 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
             failed = 0,
             reason = reason,
           })
-        elseif (requestType == "STATE" or requestType == "STATES") and state.stateRequests[token] then
+        elseif (requestType == "STATE" or requestType == "STATES" or requestType == "SELF_STRATEGY_STATE") and state.stateRequests[token] then
+          failBootstrapStateRequest(state, token)
           clearStateRequest(state, token)
         end
       end
@@ -4463,16 +7873,20 @@ function Comm.HandleAddonMessage(prefix, message, distribution, sender)
   return true
 end
 
-local function dispatchBootstrapRequests()
+local function dispatchBootstrapRequests(generation)
+  local state = ensureBridgeState()
+  if generation ~= nil and state.connectionGeneration ~= generation then
+    return false
+  end
+
   Comm.SendHello()
   Comm.SendPing()
   Comm.RequestRoster()
-  if Comm.RequestStates then
-    Comm.RequestStates()
-  end
+  requestBootstrapStates()
   if Comm.RequestBotDetails then
     Comm.RequestBotDetails()
   end
+  return true
 end
 
 function Comm.OnPlayerEnteringWorld()
@@ -4484,7 +7898,31 @@ function Comm.OnPlayerEnteringWorld()
   state.stateLatestOrderByBot = {}
   state.stateGlobalLatestToken = nil
   state.stateFramingCapable = false
+  state.capabilitiesResolved = false
+  state.bootstrapStatePending = false
+  state.bootstrapStateRequested = false
+  state.bootstrapStateToken = nil
+  state.bootstrapStateAttempts = 0
+  state.pendingStateRefreshAll = false
+  state.pendingStateRefreshByBot = {}
   state.strategyMutationCapable = false
+state.selfStrategyCapable = false
+state.selfActionCapable = false
+  state.outfitCapable = false
+  state.inventoryCapable = false
+  state.inventoryExactCapable = false
+  state.inventoryItemMoveCapable = false
+  state.inventoryItemEquipCapable = false
+  state.inventoryItemUnequipCapable = false
+  state.inventoryItemDestroyCapable = false
+  state.inventoryItemUseCapable = false
+  state.inventoryItemSellCapable = false
+  state.inventoryBuybackCapable = false
+  state.inventoryBulkSellCapable = false
+  state.inventoryOpenCapable = false
+  state.groupRollCapable = false
+  state.enchantTradeCapable = false
+  state.selfBotCapable = false
   state.strategyMutationCommands = {}
   state.details = {}
   state.stats = {}
@@ -4498,6 +7936,8 @@ function Comm.OnPlayerEnteringWorld()
   state.talentSpecs = {}
   state.talentSpecActive = nil
   state.inventoryActive = nil
+  state.inventoryExactActive = nil
+  state.inventoryExactSnapshots = {}
   state.spellbookActive = nil
   state.botSkills = {}
   state.botSkillActive = nil
@@ -4515,6 +7955,7 @@ function Comm.OnPlayerEnteringWorld()
   state.trainerCommands = {}
   state.trainerSpells = {}
   Comm.MarkDisconnected(nil)
+  local generation = state.connectionGeneration
   state.trainerActive = nil
   state.trainerCommands = {}
   state.trainerSpells = {}
@@ -4523,6 +7964,9 @@ function Comm.OnPlayerEnteringWorld()
 
   local function expireBootstrap()
     local bridge = ensureBridgeState()
+    if bridge.connectionGeneration ~= generation then
+      return
+    end
     if not bridge.connected and bridge.bootstrapPending and bridge.bootstrapDeadline > 0 and safeNow() >= bridge.bootstrapDeadline then
       bridge.bootstrapPending = false
       bridge.bootstrapDeadline = 0
@@ -4530,15 +7974,15 @@ function Comm.OnPlayerEnteringWorld()
   end
 
   if not MultiBot.TimerAfter then
-    dispatchBootstrapRequests()
+    dispatchBootstrapRequests(generation)
     expireBootstrap()
     return
   end
 
-  dispatchBootstrapRequests()
+  dispatchBootstrapRequests(generation)
 
   MultiBot.TimerAfter(1.0, function()
-    dispatchBootstrapRequests()
+    dispatchBootstrapRequests(generation)
   end)
 
   MultiBot.TimerAfter(4.1, expireBootstrap)
