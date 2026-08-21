@@ -706,6 +706,7 @@ function ShamanQuick:ApplyPersistedChoice(row, elementKey, iconPath)
     end
 end
 
+-- MB_P1A_SHAMAN_QUICK_BLOCKED_STATE_V1_START
 function ShamanQuick:SelectTotem(row, elementKey, button, definition)
     if not row or not elementKey or not button or not definition then
         return
@@ -719,19 +720,21 @@ function ShamanQuick:SelectTotem(row, elementKey, button, definition)
     local isSameSelection = currentButton == button or currentIcon == button.__mbIcon
 
     if isSameSelection then
-        MultiBot.ActionToTarget("co -" .. definition.spell .. ",?", row.owner)
+        if not MultiBot.ActionToTarget("co -" .. definition.spell .. ",?", row.owner) then
+            return
+        end
         self:ClearTotemSelection(row, elementKey)
         return
     end
 
+    local command = "co +" .. definition.spell .. ",?"
     if currentButton and currentButton ~= button and currentButton.__mbSpell then
-        MultiBot.ActionToTarget("co -" .. currentButton.__mbSpell .. ",?", row.owner)
-        if currentButton.SetButtonSelected then
-            currentButton:SetButtonSelected(false)
-        end
+        command = "co -" .. currentButton.__mbSpell .. ",+" .. definition.spell .. ",?"
     end
 
-    MultiBot.ActionToTarget("co +" .. definition.spell .. ",?", row.owner)
+    if not MultiBot.ActionToTarget(command, row.owner) then
+        return
+    end
 
     row.selectedIcons[elementKey] = button.__mbIcon
     self:SetSelectedTotemButton(row, elementKey, button)
@@ -741,7 +744,7 @@ function ShamanQuick:SelectTotem(row, elementKey, button, definition)
         MultiBot.SetShamanTotemChoice(row.owner, elementKey, button.__mbIcon)
     end
 end
-
+-- MB_P1A_SHAMAN_QUICK_BLOCKED_STATE_V1_END
 function ShamanQuick:CreateTotemButton(row, elementDefinition, groupFrame, spellDefinition, index)
     local button = createIconButton(groupFrame, string.format("MultiBotShamanTotem_%s_%s_%d", sanitizeName(row.owner), elementDefinition.key, index), spellDefinition.icon, MultiBot.L(spellDefinition.tip), BUTTON_SIZE)
     button:SetPoint("TOPLEFT", (index - 1) * (BUTTON_SIZE + BUTTON_GAP), 0)

@@ -299,6 +299,14 @@ local function refreshUnitsDisplay(unitsButton, requestedRoster, requestedFilter
         unitsButton.filter = requestedFilter
     end
 
+    if unitsButton.roster == "favorites" then
+        if MultiBot.UpdateFavoritesIndex then
+            MultiBot.UpdateFavoritesIndex()
+        elseif MultiBot.EnsureFavoriteButtons then
+            MultiBot.EnsureFavoriteButtons()
+        end
+    end
+
     if requestedRoster == "players" or unitsButton.roster == "players" then
         if MultiBot.bridge and MultiBot.bridge.connected then
             if MultiBot.bridge.roster and #MultiBot.bridge.roster > 0 then
@@ -1008,6 +1016,12 @@ function MultiBot.InitializeUnitsRootUI(tMultiBar)
     createBrowseButton(controlFrame)
     if MultiBot.BuildRTIControlUI then
         MultiBot.BuildRTIControlUI(controlFrame)
+    end
+
+    if MultiBot.UpdateFavoritesIndex then
+        MultiBot.UpdateFavoritesIndex()
+    elseif MultiBot.EnsureFavoriteButtons then
+        MultiBot.EnsureFavoriteButtons()
     end
 
     if MultiBot.bridge and MultiBot.bridge.roster and #MultiBot.bridge.roster > 0 then

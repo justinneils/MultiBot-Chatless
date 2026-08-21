@@ -1,12 +1,11 @@
-# MultiBot — Mode d'emploi Debug & Observabilité (M12)
+# MultiBot Chatless — Guide de debug et d'observabilité
 
-Date: 2026-04-15  
-Scope: Milestone 12 (M12-1 → M12-4)
+Document actif consolidé le 01/08/2026 depuis `m12-debug-mode-emploi.md`.  
+Périmètre : addon client MultiBot, debug en jeu, compteurs de performance et collecte d'un rapport reproductible.
 
-Ce document explique **comment utiliser le debug MultiBot en jeu** sans casser le gameplay ni flooder le chat.
+Ce document explique comment utiliser le debug MultiBot sans casser le gameplay ni flooder le chat.
 
 ---
-
 ## 1) Principe général
 
 - Le debug est piloté par `MultiBot.Debug` et la commande `/mbdebug`.

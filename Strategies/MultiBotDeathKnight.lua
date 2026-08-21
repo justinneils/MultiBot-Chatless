@@ -33,15 +33,15 @@ MultiBot.addDeathKnight = function(pFrame, pCombat, pNormal)
 
 	-- SRATEGIES:PRESENCE ---
 
-	if(MultiBot.isInside(pCombat, "unholy")) then
+	if(MultiBot.hasStrategy(pCombat, "unholy")) then
 		tButton.setTexture("spell_deathknight_unholypresence").setEnable().doRight = function(pButton)
 			MultiBot.OnOffActionToTarget(pButton, "co +unholy,?", "co -unholy,?", pButton.getName())
 		end
-	elseif(MultiBot.isInside(pCombat, "frost")) then
+	elseif(MultiBot.hasStrategy(pCombat, "frost")) then
 		tButton.setTexture("spell_deathknight_frostpresence").setEnable().doRight = function(pButton)
 			MultiBot.OnOffActionToTarget(pButton, "co +frost,?", "co -frost,?", pButton.getName())
 		end
-	elseif(MultiBot.isInside(pCombat, "blood")) then
+	elseif(MultiBot.hasStrategy(pCombat, "blood")) then
 		tButton.setTexture("spell_deathknight_bloodpresence").setEnable().doRight = function(pButton)
 			MultiBot.OnOffActionToTarget(pButton, "co +blood,?", "co -blood,?", pButton.getName())
 		end
@@ -105,11 +105,19 @@ MultiBot.addDeathKnight = function(pFrame, pCombat, pNormal)
 		end
 	end
 
+	-- TANK FACE --
+
+	pFrame.addButton("TankFace", -90, 0, "ability_warrior_defensivestance", MultiBot.L("tips.tankFace")).setDisable()
+	.doLeft = function(pButton)
+		MultiBot.OnOffActionToTarget(pButton, "co +tank face,?", "co -tank face,?", pButton.getName())
+	end
+
 	-- STRATEGIES --
 
-	if(MultiBot.isInside(pCombat, "dps aoe")) then pFrame.getButton("DpsAoe").setEnable() end
-	if(MultiBot.isInside(pCombat, "dps assist")) then pFrame.getButton("DpsAssist").setEnable() end
-	if(MultiBot.isInside(pCombat, "tank assist")) then pFrame.getButton("TankAssist").setEnable() end
-    if(MultiBot.isInside(pCombat, "frost aoe"))   then pFrame.getButton("FrostAoe").setEnable()   end
-    if(MultiBot.isInside(pCombat, "unholy aoe"))  then pFrame.getButton("UnholyAoe").setEnable()  end
+	if(MultiBot.hasStrategy(pCombat, "dps aoe")) then pFrame.getButton("DpsAoe").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "dps assist")) then pFrame.getButton("DpsAssist").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "tank assist")) then pFrame.getButton("TankAssist").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "tank face")) then pFrame.getButton("TankFace").setEnable() end
+    if(MultiBot.hasStrategy(pCombat, "frost aoe"))   then pFrame.getButton("FrostAoe").setEnable()   end
+    if(MultiBot.hasStrategy(pCombat, "unholy aoe"))  then pFrame.getButton("UnholyAoe").setEnable()  end
 end

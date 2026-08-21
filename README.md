@@ -77,13 +77,14 @@ This fork focuses on removing automatic bot chat spam from the main UI refresh p
 
 The addon now requests structured data from the server through `mod-multibot-bridge`.
 
-Examples of bridge requests:
+Examples of bridge request families (arguments omitted here for readability):
 
 ```text
 MBOT HELLO
 MBOT PING
 GET~ROSTER
 GET~STATES
+GET~WEAPON_ENCHANT
 GET~DETAILS
 GET~STATS
 GET~PVP_STATS
@@ -100,6 +101,7 @@ GET~GLYPHS
 GET~OUTFITS
 GET~QUESTS
 GET~GAMEOBJECTS
+GET~FORMATIONS
 RUN~CRAFT_RECIPE
 RUN~ITEM_ACTION
 RUN~OUTFIT
@@ -107,7 +109,38 @@ RUN~RTI
 RUN~COMBAT
 RUN~POSITION
 RUN~LOOT
+RUN~STRATEGY
+RUN~FORMATION
 ```
+
+The Formation family uses the following complete party/raid-wide contracts:
+
+```text
+RUN~FORMATION~GROUP~~<token>~<formation>
+FORMATION_ACK~GROUP~~<token>~<success>~<failure>~<formation>
+
+GET~FORMATIONS~GROUP~~<token>
+FORMATIONS_BEGIN~<token>~<count>
+FORMATIONS_ITEM~<token>~<botName>~<formation>
+FORMATIONS_END~<token>~<sentCount>
+```
+
+`GROUP` covers every controllable bot in the player's current party or raid. It does not target individual raid subgroups.
+
+## Current state and strategy capabilities
+
+The addon and bridge now negotiate two dedicated capabilities for authoritative bot-state synchronization and strategy mutations:
+
+```text
+STATE_FRAMING_V1
+STRATEGY_MUTATION_V1
+```
+
+`STATE_FRAMING_V1` uses tokenized `STATE` / `STATES` transactions with framed responses, bounded payloads, cleanup on terminal errors/timeouts, and stale-response protection. Per-bot requests use a 5-second timeout; global state requests use a 15-second timeout.
+
+`STRATEGY_MUTATION_V1` provides structured `co/nc` mutations through `RUN~STRATEGY` and completion through `STRATEGY_ACK`. The bridge reports matched, succeeded and failed bot counts, while the addon applies explicit timeout and rejection diagnostics.
+
+The migration is intentionally incremental. The Warlock stone, soulstone, pet and curse selectors are now migrated to structured `RUN~STRATEGY` mutations. When those selectors use the bridge, the addon waits for authoritative server `STATE` data before committing the selected UI state instead of applying an optimistic local state. Other specialized legacy UI paths still issue Playerbots chat commands directly and must be migrated before the addon can be described as fully chatless.
 
 Manual playerbot commands are still intentionally preserved for diagnostics and gameplay actions.
 
@@ -124,6 +157,16 @@ still work when the player explicitly wants to inspect a bot state.
 
 The goal is not to remove useful manual commands.  
 The goal is to remove automatic UI-refresh spam.
+
+### Warlock weapon-enchant diagnostic
+
+For targeted runtime diagnostics, the addon exposes:
+
+```text
+/mbdebug enchant [bot]
+```
+
+If the bot name is omitted, the current target is used. The command sends a single `GET~WEAPON_ENCHANT` request and displays the structured `WEAPON_ENCHANT` response with main-hand/off-hand item entries, temporary enchant IDs and remaining durations. This path is diagnostic only: it is on-demand, server-authorized and rate-limited, and is not used for polling or normal selector state synchronization.
 
 ---
 
@@ -144,7 +187,15 @@ The goal is to remove automatic UI-refresh spam.
   </tr>
   <tr>
     <td>Bot states</td>
-    <td><strong>Bridge-first</strong></td>
+    <td><strong>Bridge-first, framed</strong> — <code>STATE_FRAMING_V1</code>, tokenized <code>STATE/STATES</code> transactions, bounded payloads, timeout cleanup and stale-response protection</td>
+  </tr>
+  <tr>
+    <td>Strategy mutations</td>
+    <td><strong>Bridge-first where migrated</strong> — <code>STRATEGY_MUTATION_V1</code>, <code>RUN~STRATEGY</code>, <code>STRATEGY_ACK</code> and explicit rejection/timeout diagnostics</td>
+  </tr>
+  <tr>
+    <td>Warlock strategy selectors</td>
+    <td><strong>Bridge-first and runtime validated</strong> — Stones, Soulstones, Pets and Curses use structured strategy mutations; bridge-backed selections wait for authoritative state, invalid Warlock <code>dps</code>/<code>dps debuff</code> controls and the disabled Buff placeholder were removed, and the selector layout was compacted</td>
   </tr>
   <tr>
     <td>Bot details</td>
@@ -200,6 +251,10 @@ The goal is to remove automatic UI-refresh spam.
   <tr>
     <td>Random bot visibility</td>
     <td><strong>Improved</strong> bridge-visible grouped randombots alongside AddClass bots and altbots</td>
+  </tr>
+  <tr>
+    <td>Party / raid formation controls</td>
+    <td><strong>Bridge-first and chatless</strong> — left-click applies one formation to every controllable bot in the current party or raid through <code>RUN~FORMATION</code>; right-click reads each bot's effective formation through <code>GET~FORMATIONS</code> and displays a localized tooltip</td>
   </tr>
   <tr>
     <td>Legacy automatic chat fallback</td>
@@ -267,6 +322,7 @@ The goal is to remove automatic UI-refresh spam.
   - German client
   - French client
   - Spanish client
+- Localization files included for <code>enUS</code>, <code>enGB</code>, <code>frFR</code>, <code>esES</code>, <code>deDE</code>, <code>ruRU</code>, <code>zhCN</code> and <code>koKR</code>.
 
 ## Server
 
@@ -463,7 +519,8 @@ Implemented bridge-first / chatless areas:
 
 - Bridge handshake: `HELLO`, `HELLO_ACK`, `PING`, `PONG`.
 - Roster refresh.
-- Bot states refresh.
+- Bot states through `STATE_FRAMING_V1`, with tokenized per-bot/global transactions, framed responses, bounded state payloads, timeout cleanup and stale-response protection.
+- Strategy mutations through `STRATEGY_MUTATION_V1` for migrated controls, with `RUN~STRATEGY`, `STRATEGY_ACK`, result counters and explicit rejection/timeout diagnostics.
 - Bot details refresh.
 - Stats refresh.
 - PvP stats refresh.
@@ -482,6 +539,8 @@ Implemented bridge-first / chatless areas:
 - Pull Control frame through the bridge.
 - Combat strategy fine tuning through the bridge.
 - Disperse controls through the bridge with `disperse set <yards>` and `disperse disable`.
+- Party/raid-wide formation application through `RUN~FORMATION`, with per-bot effective formation inspection through `GET~FORMATIONS` and no PARTY/RAID chat output.
+- Localized formation status tooltip for all eight addon locale files.
 - Loot rules through the bridge with `nc +loot`, `nc -loot` and `ll all|normal|gray|quest|skill`.
 - Loot Master UI for master-loot distribution with item tooltips, candidate scoring, profession/spec hints, saved preferences and recent loot history.
 - Bridge-visible bot discovery for AddClass bots, altbots and grouped randombots.
@@ -489,6 +548,19 @@ Implemented bridge-first / chatless areas:
 - Talent tab navigation stability after switching between tabs.
 - Automatic bot reconnect on login/reload for bots already present in the group or raid.
 - Units bar refresh after adding a bot through AddClass.
+
+Validated development milestones on the current line:
+
+- PR #49 — bridge synchronization, strategy controls, persistent/offline favorites and STATE stabilization.
+- PR #50 — explicit strategy-command rejection diagnostics.
+- PR #51 — mechanical deduplication of shared roster workflow helpers.
+- Final static STATE/strategy audit on 2026-08-07: 57 checks, 0 failures; final manual runtime matrix remains pending.
+- Warlock selector batch validated on 2026-08-08: Stones, Soulstones, Pets and Curses migrated to bridge strategy mutations; authoritative bridge state handling validated; Firestone/Spellstone temporary-enchant switching validated bidirectionally with the companion bridge.
+
+Known migration remaining:
+
+- Remaining direct `SendChatMessage` occurrences outside the validated Warlock selector batch still need to be classified as manual command, diagnostic fallback, information message, UI mechanism to migrate, or dead code.
+- The project should be described as **bridge-first / mostly chatless**, not fully chatless, until these remaining paths are classified/migrated and the final runtime matrix is closed.
 
 Kept intentionally:
 
@@ -564,6 +636,24 @@ MultiBot.allowLegacyChatFallback = false
 </details>
 
 <details>
+<summary><strong>The formation tooltip does not appear or is incomplete</strong></summary>
+
+Check that the bridge is connected and that the bots are controllable members of the same party or raid as the player.
+
+A right-click on the Formation button should produce structured bridge traffic similar to:
+
+```text
+GET~FORMATIONS~GROUP~~<token>
+FORMATIONS_BEGIN~<token>~<count>
+FORMATIONS_ITEM~<token>~<botName>~<formation>
+FORMATIONS_END~<token>~<sentCount>
+```
+
+The query is raid-wide: it includes all controllable bots in the current party or raid and does not target individual raid subgroups.
+
+</details>
+
+<details>
 <summary><strong>Inventory, spellbook, glyphs or outfits do not update</strong></summary>
 
 Check the server console for bridge requests such as:
@@ -617,6 +707,15 @@ The frame uses the client master-loot candidate API and enriches candidates with
 
 ---
 
+# Project Documentation
+
+The active project documentation is intentionally limited to two files:
+
+- [Development roadmap](docs/ROADMAP.md) — current phases, priorities, risks and acceptance criteria.
+- [Debug and observability runbook](docs/DEBUG_RUNBOOK.md) — in-game debug commands, performance counters and bug-report procedure.
+
+---
+
 # Repository Layout
 
 ```text
@@ -631,6 +730,8 @@ MultiBot-Chatless/
 ├── Textures/
 ├── UI/
 ├── docs/
+│   ├── DEBUG_RUNBOOK.md
+│   └── ROADMAP.md
 └── MultiBot.toc
 ```
 

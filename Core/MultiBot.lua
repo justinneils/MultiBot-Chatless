@@ -1331,6 +1331,470 @@ local function IsBridgeRosterBotActive(botName)
   return false
 end
 
+-- HOTFIX FAVORITES METADATA + ROSTER SYNC V1 START
+local FAVORITE_ROSTER_REFRESH_DELAYS = { 0, 0.8, 1.8, 3.2, 5.0, 7.5, 9.5 }
+local FAVORITE_ROSTER_REFRESH_TTL = 10.0
+
+local function GetBridgeWorkflowNow()
+  if type(GetTime) == "function" then
+    return GetTime()
+  end
+
+  if type(time) == "function" then
+    return time()
+  end
+
+  return 0
+end
+
+local function NormalizeBridgeWorkflowName(name)
+  if type(name) ~= "string" then
+    return ""
+  end
+
+  return string.lower(name)
+end
+
+local function GetFavoriteRosterRefreshState()
+  if type(MultiBot._favoriteRosterRefresh) ~= "table" then
+    MultiBot._favoriteRosterRefresh = {}
+  end
+
+  local state = MultiBot._favoriteRosterRefresh
+  state.sequence = tonumber(state.sequence or 0) or 0
+  state.targets = type(state.targets) == "table" and state.targets or {}
+  return state
+end
+
+local function PruneFavoriteRosterRefreshTargets(state)
+  local now = GetBridgeWorkflowNow()
+  local unresolved = 0
+
+  for key, target in pairs(state.targets) do
+    if type(target) ~= "table"
+        or tonumber(target.expiresAt or 0) <= now
+        or IsBridgeRosterBotActive(target.name) then
+      state.targets[key] = nil
+    else
+      unresolved = unresolved + 1
+    end
+  end
+
+  return unresolved
+end
+
+function MultiBot.ObserveFavoriteRosterRefresh(_)
+  local state = GetFavoriteRosterRefreshState()
+  return PruneFavoriteRosterRefreshTargets(state)
+end
+
+function MultiBot.BeginFavoriteRosterRefresh(name)
+  if type(name) ~= "string" or name == "" then
+    return false
+  end
+
+  if not (MultiBot.bridge and MultiBot.bridge.connected
+      and MultiBot.Comm and type(MultiBot.Comm.RequestRoster) == "function") then
+    return false
+  end
+
+  local state = GetFavoriteRosterRefreshState()
+  local key = NormalizeBridgeWorkflowName(name)
+  local now = GetBridgeWorkflowNow()
+
+  state.sequence = state.sequence + 1
+  local generation = state.sequence
+
+  state.targets[key] = {
+    name = name,
+    expiresAt = now + FAVORITE_ROSTER_REFRESH_TTL,
+    generation = generation,
+  }
+
+  local function requestRoster(attempt)
+    local target = state.targets[key]
+    if type(target) ~= "table" or target.generation ~= generation then
+      return
+    end
+
+    if tonumber(target.expiresAt or 0) <= GetBridgeWorkflowNow() then
+      state.targets[key] = nil
+      return
+    end
+
+    if MultiBot.bridge and MultiBot.bridge.connected
+        and MultiBot.Comm and type(MultiBot.Comm.RequestRoster) == "function" then
+      MultiBot.Comm.RequestRoster()
+    end
+
+    if attempt >= #FAVORITE_ROSTER_REFRESH_DELAYS then
+      PruneFavoriteRosterRefreshTargets(state)
+    end
+  end
+
+  for index = 1, #FAVORITE_ROSTER_REFRESH_DELAYS do
+    local attempt = index
+    local delay = FAVORITE_ROSTER_REFRESH_DELAYS[index]
+
+    if delay <= 0 then
+      requestRoster(attempt)
+    elseif type(MultiBot.TimerAfter) == "function" then
+      MultiBot.TimerAfter(delay, function()
+        requestRoster(attempt)
+      end)
+    end
+  end
+
+  return true
+end
+
+local function UpdateBridgeUnitButton(button, className, level, name)
+  if not button then
+    return false
+  end
+
+  local classCanon = (MultiBot.toClass and MultiBot.toClass(className or "UNKNOWN")) or "UNKNOWN"
+  if type(classCanon) ~= "string" or classCanon == "" then
+    classCanon = "UNKNOWN"
+  end
+
+  if string.lower(classCanon) == "unknown"
+      and type(button.class) == "string"
+      and button.class ~= ""
+      and string.lower(button.class) ~= "unknown" then
+    classCanon = button.class
+  end
+
+  local texture = "Interface\\Icons\\INV_Misc_QuestionMark"
+  if string.lower(classCanon) ~= "unknown" then
+    texture = "Interface\\AddOns\\MultiBot\\Icons\\class_"
+        .. string.lower(classCanon) .. ".blp"
+  end
+
+  local displayClass = classCanon
+  if string.lower(classCanon) == "unknown" then
+    displayClass = "Unknown"
+  elseif MultiBot.GetClassDisplay then
+    displayClass = MultiBot.GetClassDisplay(classCanon) or classCanon
+  end
+
+  local numericLevel = tonumber(level)
+  if numericLevel and numericLevel <= 0 then
+    numericLevel = nil
+  end
+
+  local tooltip = MultiBot.toTip
+      and MultiBot.toTip(displayClass, numericLevel, name or button.name)
+      or (name or button.name)
+
+  if button.setButton then
+    button.setButton(texture, tooltip)
+  elseif button.icon and button.icon.SetTexture then
+    button.icon:SetTexture(
+      MultiBot.SafeTexturePath and MultiBot.SafeTexturePath(texture) or texture
+    )
+  end
+
+  button.class = classCanon
+  if numericLevel then
+    button.level = numericLevel
+  end
+
+  return true
+end
+-- HOTFIX FAVORITES METADATA + ROSTER SYNC V1 END
+
+-- HOTFIX ADDCLASS AUTO-GROUP ROSTER V1 START
+local ADDCLASS_AUTO_GROUP_CLASS_IDS = {
+  warrior = 1,
+  paladin = 2,
+  hunter = 3,
+  rogue = 4,
+  priest = 5,
+  deathknight = 6,
+  dk = 6,
+  shaman = 7,
+  mage = 8,
+  warlock = 9,
+  druid = 11,
+}
+
+local ADDCLASS_AUTO_GROUP_TIMEOUT = 12.0
+local ADDCLASS_AUTO_GROUP_MAX_PENDING = 8
+local ADDCLASS_AUTO_GROUP_MAX_ATTEMPTS = 3
+local ADDCLASS_AUTO_GROUP_RETRY_DELAY = 1.5
+
+local function GetAddClassAutoGroupState()
+  if type(MultiBot._addClassAutoGroup) ~= "table" then
+    MultiBot._addClassAutoGroup = {}
+  end
+
+  local state = MultiBot._addClassAutoGroup
+  state.sequence = tonumber(state.sequence or 0) or 0
+  state.pending = type(state.pending) == "table" and state.pending or {}
+  state.claimed = type(state.claimed) == "table" and state.claimed or {}
+  return state
+end
+
+local function ReleaseAddClassAutoGroupClaim(state, transaction)
+  if not state or not transaction or not transaction.candidateKey then
+    return
+  end
+
+  if state.claimed[transaction.candidateKey] == transaction.id then
+    state.claimed[transaction.candidateKey] = nil
+  end
+end
+
+local function CompleteAddClassAutoGroupTransaction(state, transaction)
+  if not transaction or transaction.completed then
+    return
+  end
+
+  transaction.completed = true
+  transaction.inviteScheduled = false
+  ReleaseAddClassAutoGroupClaim(state, transaction)
+end
+
+local function CompactAddClassAutoGroupState(state)
+  local now = GetBridgeWorkflowNow()
+  local pending = {}
+
+  for _, transaction in ipairs(state.pending) do
+    if transaction.completed or now >= transaction.expiresAt then
+      ReleaseAddClassAutoGroupClaim(state, transaction)
+    else
+      pending[#pending + 1] = transaction
+    end
+  end
+
+  state.pending = pending
+end
+
+local function BuildAddClassAutoGroupBaseline()
+  local names = {}
+
+  if MultiBot.bridge and type(MultiBot.bridge.roster) == "table" then
+    for _, entry in ipairs(MultiBot.bridge.roster) do
+      if type(entry) == "table" and type(entry.name) == "string" and entry.name ~= "" then
+        names[NormalizeBridgeWorkflowName(entry.name)] = true
+      end
+    end
+  end
+
+  if MultiBot.index and type(MultiBot.index.players) == "table" then
+    for _, name in ipairs(MultiBot.index.players) do
+      if type(name) == "string" and name ~= "" then
+        names[NormalizeBridgeWorkflowName(name)] = true
+      end
+    end
+  end
+
+  local playerName = type(UnitName) == "function" and UnitName("player") or nil
+  if type(playerName) == "string" and playerName ~= "" then
+    names[NormalizeBridgeWorkflowName(playerName)] = true
+  end
+
+  return names
+end
+
+local function ScheduleAddClassAutoGroupInvite(state, transaction)
+  if not state or not transaction or transaction.completed or transaction.inviteScheduled then
+    return false
+  end
+
+  local botName = transaction.candidateName
+  if type(botName) ~= "string" or botName == "" then
+    return false
+  end
+
+  if IsBridgeRosterBotActive(botName) then
+    CompleteAddClassAutoGroupTransaction(state, transaction)
+    return true
+  end
+
+  if transaction.inviteAttempts >= ADDCLASS_AUTO_GROUP_MAX_ATTEMPTS then
+    return false
+  end
+
+  transaction.inviteScheduled = true
+
+  local delay = 0
+  local inRaid = type(IsInRaid) == "function" and IsInRaid()
+  local partyCount = type(GetNumPartyMembers) == "function" and (GetNumPartyMembers() or 0) or 0
+
+  if not inRaid and partyCount >= 4 and type(ConvertToRaid) == "function" then
+    ConvertToRaid()
+    delay = 0.25
+  end
+
+  local function inviteCandidate()
+    transaction.inviteScheduled = false
+
+    if transaction.completed then
+      return
+    end
+
+    local now = GetBridgeWorkflowNow()
+    if now >= transaction.expiresAt then
+      CompleteAddClassAutoGroupTransaction(state, transaction)
+      return
+    end
+
+    if IsBridgeRosterBotActive(botName) then
+      CompleteAddClassAutoGroupTransaction(state, transaction)
+      return
+    end
+
+    transaction.inviteAttempts = transaction.inviteAttempts + 1
+    transaction.lastInviteAt = now
+
+    if MultiBot.doSlash then
+      MultiBot.doSlash("/invite", botName)
+    elseif type(InviteUnit) == "function" then
+      InviteUnit(botName)
+    else
+      return
+    end
+
+    if type(MultiBot.TimerAfter) == "function" then
+      MultiBot.TimerAfter(ADDCLASS_AUTO_GROUP_RETRY_DELAY, function()
+        if transaction.completed then
+          return
+        end
+
+        if IsBridgeRosterBotActive(botName) then
+          CompleteAddClassAutoGroupTransaction(state, transaction)
+        elseif transaction.inviteAttempts < ADDCLASS_AUTO_GROUP_MAX_ATTEMPTS
+            and GetBridgeWorkflowNow() < transaction.expiresAt then
+          ScheduleAddClassAutoGroupInvite(state, transaction)
+        end
+
+        CompactAddClassAutoGroupState(state)
+      end)
+    end
+  end
+
+  if delay > 0 and type(MultiBot.TimerAfter) == "function" then
+    MultiBot.TimerAfter(delay, inviteCandidate)
+  else
+    inviteCandidate()
+  end
+
+  return true
+end
+
+function MultiBot.BeginAddClassAutoGroup(classCmd)
+  if not (MultiBot.bridge and MultiBot.bridge.connected
+          and MultiBot.Comm and type(MultiBot.Comm.RequestRoster) == "function") then
+    return false
+  end
+
+  local normalizedClass = type(classCmd) == "string" and string.lower(classCmd) or ""
+  local classId = ADDCLASS_AUTO_GROUP_CLASS_IDS[normalizedClass]
+  if not classId then
+    return false
+  end
+
+  local state = GetAddClassAutoGroupState()
+  CompactAddClassAutoGroupState(state)
+
+  while #state.pending >= ADDCLASS_AUTO_GROUP_MAX_PENDING do
+    local removed = table.remove(state.pending, 1)
+    ReleaseAddClassAutoGroupClaim(state, removed)
+  end
+
+  state.sequence = state.sequence + 1
+  local now = GetBridgeWorkflowNow()
+  local transaction = {
+    id = state.sequence,
+    classId = classId,
+    baseline = BuildAddClassAutoGroupBaseline(),
+    createdAt = now,
+    expiresAt = now + ADDCLASS_AUTO_GROUP_TIMEOUT,
+    inviteAttempts = 0,
+    inviteScheduled = false,
+    completed = false,
+  }
+
+  state.pending[#state.pending + 1] = transaction
+
+  if type(MultiBot.TimerAfter) == "function" then
+    MultiBot.TimerAfter(4.0, function()
+      if not transaction.completed and GetBridgeWorkflowNow() < transaction.expiresAt
+          and MultiBot.bridge and MultiBot.bridge.connected
+          and MultiBot.Comm and type(MultiBot.Comm.RequestRoster) == "function" then
+        MultiBot.Comm.RequestRoster()
+      end
+    end)
+
+    MultiBot.TimerAfter(8.0, function()
+      if not transaction.completed and GetBridgeWorkflowNow() < transaction.expiresAt
+          and MultiBot.bridge and MultiBot.bridge.connected
+          and MultiBot.Comm and type(MultiBot.Comm.RequestRoster) == "function" then
+        MultiBot.Comm.RequestRoster()
+      end
+    end)
+  end
+
+  return true
+end
+
+function MultiBot.ProcessPendingAddClassRoster(roster)
+  if type(roster) ~= "table" then
+    return 0
+  end
+
+  local state = GetAddClassAutoGroupState()
+  CompactAddClassAutoGroupState(state)
+
+  local scheduled = 0
+  local now = GetBridgeWorkflowNow()
+
+  for _, transaction in ipairs(state.pending) do
+    if not transaction.completed then
+      if transaction.candidateName then
+        if IsBridgeRosterBotActive(transaction.candidateName) then
+          CompleteAddClassAutoGroupTransaction(state, transaction)
+        elseif not transaction.inviteScheduled
+            and transaction.inviteAttempts < ADDCLASS_AUTO_GROUP_MAX_ATTEMPTS
+            and (not transaction.lastInviteAt
+                 or now - transaction.lastInviteAt >= ADDCLASS_AUTO_GROUP_RETRY_DELAY) then
+          if ScheduleAddClassAutoGroupInvite(state, transaction) then
+            scheduled = scheduled + 1
+          end
+        end
+      else
+        for _, entry in ipairs(roster) do
+          local name = type(entry) == "table" and entry.name or nil
+          local classId = type(entry) == "table" and tonumber(entry.classId or 0) or 0
+          local key = NormalizeBridgeWorkflowName(name)
+
+          if key ~= "" and classId == transaction.classId
+              and not transaction.baseline[key]
+              and not state.claimed[key] then
+            transaction.candidateName = name
+            transaction.candidateKey = key
+            state.claimed[key] = transaction.id
+
+            if IsBridgeRosterBotActive(name) then
+              CompleteAddClassAutoGroupTransaction(state, transaction)
+            elseif ScheduleAddClassAutoGroupInvite(state, transaction) then
+              scheduled = scheduled + 1
+            end
+
+            break
+          end
+        end
+      end
+    end
+  end
+
+  CompactAddClassAutoGroupState(state)
+  return scheduled
+end
+-- HOTFIX ADDCLASS AUTO-GROUP ROSTER V1 END
+
 local function HideButtonUnitFrame(button)
   if not button or not button.parent or not button.parent.frames then
     return
@@ -1369,6 +1833,12 @@ function MultiBot.BindUnitToggleHandlers(button, options)
 
     SendChatMessage(".playerbot bot add " .. unitButton.name, "SAY")
     unitButton.setEnable()
+
+    if (unitButton._mbFavoritePlaceholder
+        or (MultiBot.IsFavorite and MultiBot.IsFavorite(unitButton.name)))
+        and MultiBot.BeginFavoriteRosterRefresh then
+      MultiBot.BeginFavoriteRosterRefresh(unitButton.name)
+    end
   end
 
   button._mbUnitToggleBound = true
@@ -1378,6 +1848,10 @@ end
 function MultiBot.SyncBridgeRosterToPlayers(roster)
   if type(roster) ~= "table" then
     return false
+  end
+
+  if MultiBot.ObserveFavoriteRosterRefresh then
+    MultiBot.ObserveFavoriteRosterRefresh(roster)
   end
 
   if not (MultiBot.frames and MultiBot.frames["MultiBar"]
@@ -1392,6 +1866,13 @@ function MultiBot.SyncBridgeRosterToPlayers(roster)
   local buttons = units.buttons or {}
   local frames = units.frames or {}
   local visibleNames = {}
+  local previousActive = {}
+
+  for _, activeName in ipairs(MultiBot.index.actives or {}) do
+    if type(activeName) == "string" and activeName ~= "" then
+      previousActive[string.lower(activeName)] = true
+    end
+  end
 
   local playerName = nil
   if type(UnitName) == "function" then
@@ -1439,6 +1920,7 @@ function MultiBot.SyncBridgeRosterToPlayers(roster)
       local botClass = GetBridgeRosterClass(entry.classId)
       local button = MultiBot.addPlayer(botClass, entry.name)
       if button then
+        button._mbFavoritePlaceholder = nil
         local isActive = IsBridgeRosterBotActive(entry.name)
 
         button.class = botClass
@@ -1449,6 +1931,7 @@ function MultiBot.SyncBridgeRosterToPlayers(roster)
         button.hpPct = tonumber(entry.hpPct or 0) or 0
         button.mpPct = tonumber(entry.mpPct or 0) or 0
         button.bridge = entry
+        UpdateBridgeUnitButton(button, botClass, button.level, entry.name)
 
         if MultiBot.BindUnitToggleHandlers then
           MultiBot.BindUnitToggleHandlers(button, { requireEnabledStateOnRight = true })
@@ -1463,6 +1946,16 @@ function MultiBot.SyncBridgeRosterToPlayers(roster)
           if button.setEnable then
             button.setEnable()
           end
+
+          local activeKey = string.lower(entry.name)
+          if previousActive[activeKey] ~= true
+              and MultiBot.bridge and MultiBot.bridge.connected
+              and MultiBot.Comm and type(MultiBot.Comm.RequestState) == "function" then
+            local stateRequest = MultiBot.Comm.RequestState(entry.name)
+            if stateRequest then
+              button.waitFor = "BRIDGE_STATE"
+            end
+          end
         else
           if button.setDisable then
             button.setDisable()
@@ -1470,6 +1963,10 @@ function MultiBot.SyncBridgeRosterToPlayers(roster)
         end
       end
     end
+  end
+
+  if MultiBot.ProcessPendingAddClassRoster then
+    MultiBot.ProcessPendingAddClassRoster(roster)
   end
 
   if MultiBot.UpdateFavoritesIndex then
@@ -1528,6 +2025,25 @@ function MultiBot.GetCachedBridgeDetail(name)
   return MultiBot.bridge.details[string.lower(name)]
 end
 
+local function NormalizeBridgeDetailStoreGender(value)
+  local gender = tostring(value or "")
+  local normalized = string.lower(gender)
+
+  if normalized == "male" or normalized == "m" or normalized == "[m]" then
+    return "[M]"
+  end
+
+  if normalized == "female" or normalized == "f" or normalized == "[f]" then
+    return "[F]"
+  end
+
+  if string.match(gender, "^%[[^%],]+%]$") then
+    return gender
+  end
+
+  return "[?]"
+end
+
 local function BuildBridgeDetailStoreValue(detail)
   if type(detail) ~= "table" or type(detail.name) ~= "string" or detail.name == "" then
     return nil
@@ -1558,7 +2074,7 @@ local function BuildBridgeDetailStoreValue(detail)
 
   local classDisplay = (MultiBot.GetClassDisplay and MultiBot.GetClassDisplay(classCanon)) or classCanon
   local race = tostring(detail.race or "Unknown")
-  local gender = tostring(detail.gender or "Unknown")
+  local gender = NormalizeBridgeDetailStoreGender(detail.gender)
   local talents = talent1 .. "/" .. talent2 .. "/" .. talent3
   local level = tonumber(detail.level or 0) or 0
   local score = tonumber(detail.score or 0) or 0
@@ -1576,13 +2092,37 @@ function MultiBot.ApplyBridgeBotDetail(detail)
     return false
   end
 
+  local storedValue
   if MultiBot.SetGlobalBotEntry then
-    MultiBot.SetGlobalBotEntry(detail.name, value)
+    storedValue = MultiBot.SetGlobalBotEntry(detail.name, value)
   else
     if type(_G.MultiBotGlobalSave) ~= "table" then
       _G.MultiBotGlobalSave = {}
     end
     _G.MultiBotGlobalSave[detail.name] = value
+    storedValue = value
+  end
+
+  if not storedValue then
+    return false
+  end
+
+  local units = MultiBot.frames
+      and MultiBot.frames["MultiBar"]
+      and MultiBot.frames["MultiBar"].frames
+      and MultiBot.frames["MultiBar"].frames["Units"]
+  local button = units and units.buttons and units.buttons[detail.name]
+  local classCanon = (MultiBot.toClass
+      and MultiBot.toClass(detail.className or detail.class or "Unknown"))
+      or "Unknown"
+
+  if button then
+    UpdateBridgeUnitButton(button, classCanon, detail.level, detail.name)
+  end
+
+  if MultiBot.IsFavorite and MultiBot.IsFavorite(detail.name)
+      and MultiBot.UpdateFavoritesIndex then
+    MultiBot.UpdateFavoritesIndex()
   end
 
   if MultiBot.raidus and MultiBot.raidus.setRaidus and MultiBot.raidus.IsShown and MultiBot.raidus:IsShown() then
@@ -1958,40 +2498,174 @@ function MultiBot.IsFavorite(name)
   return favorites and favorites[name] == true
 end
 
-function MultiBot.UpdateFavoritesIndex()
-  local favorites = getFavoritesStore()
+local FAVORITE_UNKNOWN_CLASS = "UNKNOWN"
+local FAVORITE_UNKNOWN_TEXTURE = "Interface\\Icons\\INV_Misc_QuestionMark"
 
-  MultiBot.index.favorites = {}
-  MultiBot.index.classes.favorites = {}
-  for name, _ in pairs(favorites or {}) do
-    table.insert(MultiBot.index.favorites, name)
-    local cls = nil
-    -- 1) If the unit button already exists, use its class.
-    local units = nil
-    if MultiBot.frames and MultiBot.frames["MultiBar"]
-       and MultiBot.frames["MultiBar"].frames
-       and MultiBot.frames["MultiBar"].frames["Units"]
-    then
-      units = MultiBot.frames["MultiBar"].frames["Units"]
+local function NormalizeFavoriteClass(value)
+  if type(value) ~= "string" or value == "" then
+    return FAVORITE_UNKNOWN_CLASS
+  end
+
+  local className = (MultiBot.toClass and MultiBot.toClass(value)) or value
+  if type(className) ~= "string" or className == ""
+      or string.lower(className) == "unknown" then
+    return FAVORITE_UNKNOWN_CLASS
+  end
+
+  return className
+end
+
+local function FindFavoriteClassInPlayersIndex(name)
+  local byClass = MultiBot.index
+      and MultiBot.index.classes
+      and MultiBot.index.classes.players
+
+  if type(byClass) ~= "table" then
+    return nil
+  end
+
+  for className, names in pairs(byClass) do
+    for index = 1, (names and #names or 0) do
+      if names[index] == name then
+        return NormalizeFavoriteClass(className)
+      end
     end
-    local buttons = units and units.buttons or nil
-    if buttons and buttons[name] and buttons[name].class then
-      cls = buttons[name].class
-    else
-      -- 2) Otherwise fallback to players class index.
-      local byClass = MultiBot.index and MultiBot.index.classes and MultiBot.index.classes.players
-      if byClass then
-        for c, arr in pairs(byClass) do
-          for i = 1, (arr and #arr or 0) do
-            if arr[i] == name then cls = c break end
-          end
-          if cls then break end
+  end
+
+  return nil
+end
+
+local function GetFavoriteCachedMetadata(name)
+  local store = MultiBot.GetGlobalBotStore and MultiBot.GetGlobalBotStore()
+  local value = store and store[name]
+
+  if type(value) ~= "string" then
+    return FAVORITE_UNKNOWN_CLASS, nil
+  end
+
+  local classValue, levelValue = string.match(
+    value,
+    "^[^,]*,[^,]*,[^,]*,[^,]*,([^,]*),([^,]*),"
+  )
+
+  return NormalizeFavoriteClass(classValue), tonumber(levelValue)
+end
+
+function MultiBot.ResolveFavoriteButtonMetadata(name, units)
+  local button = units and units.buttons and units.buttons[name]
+  if button and button.class then
+    local buttonClass = NormalizeFavoriteClass(button.class)
+    if buttonClass ~= FAVORITE_UNKNOWN_CLASS then
+      return buttonClass, tonumber(button.level)
+    end
+  end
+
+  local indexedClass = FindFavoriteClassInPlayersIndex(name)
+  if indexedClass and indexedClass ~= FAVORITE_UNKNOWN_CLASS then
+    return indexedClass, button and tonumber(button.level) or nil
+  end
+
+  return GetFavoriteCachedMetadata(name)
+end
+
+function MultiBot.EnsureFavoriteButtons(favorites)
+  local units = MultiBot.frames
+      and MultiBot.frames["MultiBar"]
+      and MultiBot.frames["MultiBar"].frames
+      and MultiBot.frames["MultiBar"].frames["Units"]
+
+  if not units or type(units.addButton) ~= "function" then
+    return 0
+  end
+
+  favorites = favorites or getFavoritesStore()
+  local created = 0
+
+  for name, isFavorite in pairs(favorites or {}) do
+    if isFavorite == true and type(name) == "string" and name ~= "" then
+      local button = units.buttons and units.buttons[name]
+      if button and button._mbFavoritePlaceholder and button.roster ~= "favorites" then
+        button._mbFavoritePlaceholder = nil
+      end
+
+      local className, level = MultiBot.ResolveFavoriteButtonMetadata(name, units)
+      local texture = FAVORITE_UNKNOWN_TEXTURE
+      if className ~= FAVORITE_UNKNOWN_CLASS then
+        texture = "Interface\\AddOns\\MultiBot\\Icons\\class_"
+            .. string.lower(className) .. ".blp"
+      end
+
+      local displayClass = className
+      if className == FAVORITE_UNKNOWN_CLASS then
+        displayClass = "Unknown"
+      elseif MultiBot.GetClassDisplay then
+        displayClass = MultiBot.GetClassDisplay(className) or className
+      end
+
+      local tooltip = MultiBot.toTip
+          and MultiBot.toTip(displayClass, level, name)
+          or name
+
+      if not button then
+        button = units.addButton(name, 0, 0, texture, tooltip)
+        button:Hide()
+        button._mbFavoritePlaceholder = true
+        button.roster = "favorites"
+        created = created + 1
+      elseif button._mbFavoritePlaceholder and button.setButton then
+        button.setButton(texture, tooltip)
+      end
+
+      if button then
+        button.name = name
+        if not button.class
+            or NormalizeFavoriteClass(button.class) == FAVORITE_UNKNOWN_CLASS then
+          button.class = className
+        end
+        if level and not button.level then
+          button.level = level
+        end
+
+        if MultiBot.BindUnitToggleHandlers then
+          MultiBot.BindUnitToggleHandlers(
+            button,
+            { requireEnabledStateOnRight = true }
+          )
+        end
+
+        if button._mbFavoritePlaceholder and button.setDisable then
+          button.setDisable()
         end
       end
     end
-    cls = cls or "UNKNOWN"
-    MultiBot.index.classes.favorites[cls] = MultiBot.index.classes.favorites[cls] or {}
-    table.insert(MultiBot.index.classes.favorites[cls], name)
+  end
+
+  return created
+end
+
+function MultiBot.UpdateFavoritesIndex()
+  local favorites = getFavoritesStore()
+  local units = MultiBot.frames
+      and MultiBot.frames["MultiBar"]
+      and MultiBot.frames["MultiBar"].frames
+      and MultiBot.frames["MultiBar"].frames["Units"]
+
+  MultiBot.index.favorites = {}
+  MultiBot.index.classes.favorites = {}
+
+  for name, isFavorite in pairs(favorites or {}) do
+    if isFavorite == true and type(name) == "string" and name ~= "" then
+      table.insert(MultiBot.index.favorites, name)
+
+      local className = MultiBot.ResolveFavoriteButtonMetadata(name, units)
+      MultiBot.index.classes.favorites[className] =
+          MultiBot.index.classes.favorites[className] or {}
+      table.insert(MultiBot.index.classes.favorites[className], name)
+    end
+  end
+
+  if MultiBot.EnsureFavoriteButtons then
+    MultiBot.EnsureFavoriteButtons(favorites)
   end
 end
 
@@ -2003,6 +2677,19 @@ function MultiBot.SetFavorite(name, isFav)
   if isFav then favorites[name] = true
            else favorites[name] = nil
   end
+
+  if isFav then
+    local detail = MultiBot.GetCachedBridgeDetail
+        and MultiBot.GetCachedBridgeDetail(name)
+
+    if detail and MultiBot.ApplyBridgeBotDetail then
+      MultiBot.ApplyBridgeBotDetail(detail)
+    elseif MultiBot.bridge and MultiBot.bridge.connected
+        and MultiBot.Comm and type(MultiBot.Comm.RequestBotDetail) == "function" then
+      MultiBot.Comm.RequestBotDetail(name)
+    end
+  end
+
   MultiBot.UpdateFavoritesIndex()
 end
 
@@ -2189,6 +2876,10 @@ MultiBot.AddClassToTarget = function(classCmd, gender)
 	msg = msg .. " " .. gender
 	print("[DBG] Message de sortie :" ,msg)
   end
+  if MultiBot.BeginAddClassAutoGroup then
+    MultiBot.BeginAddClassAutoGroup(classCmd)
+  end
+
   SendChatMessage(msg, "SAY")
 
   if MultiBot.RequestBridgeRosterRefresh then

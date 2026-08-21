@@ -341,9 +341,9 @@ MultiBot.addEvery = function(pFrame, pCombat, pNormal)
 
 -- STRATEGIES --
 
-	if(MultiBot.isInside(pNormal, "food")) then pFrame.getButton("Food").setEnable() end
-	if(MultiBot.isInside(pNormal, "loot")) then pFrame.getButton("Loot").setEnable() end
-	if(MultiBot.isInside(pNormal, "gather")) then pFrame.getButton("Gather").setEnable() end
+	if(MultiBot.hasStrategy(pNormal, "food")) then pFrame.getButton("Food").setEnable() end
+	if(MultiBot.hasStrategy(pNormal, "loot")) then pFrame.getButton("Loot").setEnable() end
+	if(MultiBot.hasStrategy(pNormal, "gather")) then pFrame.getButton("Gather").setEnable() end
 end
 
 local function sendCommonCombatStrategy(pButton, command)
@@ -384,7 +384,7 @@ local function addCommonCombatStrategyButton(pFrame, pCombat, tFrame, buttonName
 		end
 	end
 
-	if MultiBot.isInside(pCombat, strategyName) then
+	if MultiBot.hasStrategy(pCombat, strategyName) then
 		pFrame.getButton(buttonName).setEnable()
 	end
 end

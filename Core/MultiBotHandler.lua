@@ -2592,7 +2592,63 @@ local function parseDebugCommandArgs(msg)
   return normalizeDebugToken(action), normalizeDebugToken(subsystem)
 end
 
+MultiBot.OnWeaponEnchantDebug = function(result)
+  if type(result) ~= "table" then
+    return
+  end
+
+  local botName = tostring(result.botName or "?")
+  local status = tostring(result.status or "UNKNOWN")
+  if status ~= "OK" then
+    printToChat("[MB] Enchant " .. botName .. " => " .. status)
+    return
+  end
+
+  printToChat(string.format(
+    "[MB] Enchant %s | MH item=%u temp=%u duration=%ums | OH item=%u temp=%u duration=%ums",
+    botName,
+    tonumber(result.mainItem or 0) or 0,
+    tonumber(result.mainEnchant or 0) or 0,
+    tonumber(result.mainDuration or 0) or 0,
+    tonumber(result.offItem or 0) or 0,
+    tonumber(result.offEnchant or 0) or 0,
+    tonumber(result.offDuration or 0) or 0
+  ))
+end
+
 local function DebugCommand(msg)
+  local rawAction, rawArgument = string.match(tostring(msg or ""), "^%s*(%S*)%s*(.-)%s*$")
+  if normalizeDebugToken(rawAction) == "enchant" then
+    local botName = tostring(rawArgument or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if botName == "" and type(UnitName) == "function" then
+      botName = UnitName("target") or ""
+    end
+
+    if botName == "" then
+      printToChat("[MB] Usage: /mbdebug enchant [bot] (ou cibler un bot)")
+      return
+    end
+
+    if not (MultiBot and MultiBot.Comm and MultiBot.bridge and MultiBot.bridge.connected) then
+      printToChat("[MB] Bridge indisponible.")
+      return
+    end
+
+    if type(MultiBot.Comm.RequestWeaponEnchantDebug) ~= "function" then
+      printToChat("[MB] Diagnostic enchant indisponible.")
+      return
+    end
+
+    local token = MultiBot.Comm.RequestWeaponEnchantDebug(botName)
+    if not token then
+      printToChat("[MB] Diagnostic enchant non envoye.")
+      return
+    end
+
+    printToChat("[MB] Diagnostic enchant demande pour " .. botName .. ".")
+    return
+  end
+
   local debugApi = MultiBot.Debug
   if type(debugApi) ~= "table" then
     printToChat("[MB] Debug API indisponible.")
@@ -2634,7 +2690,7 @@ local function DebugCommand(msg)
   end
 
   if not subsystem then
-    printToChat("[MB] Usage: /mbdebug list | /mbdebug on <subsystem> | /mbdebug off <subsystem> | /mbdebug toggle <subsystem> | /mbdebug all on|off | /mbdebug counters [reset]")
+    printToChat("[MB] Usage: /mbdebug list | /mbdebug on <subsystem> | /mbdebug off <subsystem> | /mbdebug toggle <subsystem> | /mbdebug all on|off | /mbdebug counters [reset] | /mbdebug enchant [bot]")
     return
   end
 

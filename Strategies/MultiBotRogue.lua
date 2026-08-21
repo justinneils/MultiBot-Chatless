@@ -32,7 +32,7 @@ MultiBot.addRogue = function(pFrame, pCombat, pNormal)
 	tFrame.addButton("Stealth", 0, 78, "ability_stealth",  MultiBot.L("tips.rogue.dps.stealth")).setDisable()
 	.doLeft = function(pButton)
 		-- "stealth" est une stratégie non-combat : on la pousse côté pNormal
-		MultiBot.OnOffActionToTarget(pButton, "co +stealth,?", "co -stealth,?", pButton.getName())
+		MultiBot.OnOffActionToTarget(pButton, "nc +stealth,?", "nc -stealth,?", pButton.getName())
 	end
 
 	-- STEALTHED (comportement EN CAMOUFLAGE en combat)
@@ -68,11 +68,11 @@ MultiBot.addRogue = function(pFrame, pCombat, pNormal)
 
 	-- STRATEGIES --
 
-	if(MultiBot.isInside(pCombat, "dps")) then pFrame.getButton("Dps").setEnable() end
-	if(MultiBot.isInside(pCombat, "dps aoe")) then pFrame.getButton("DpsAoe").setEnable() end
-	if(MultiBot.isInside(pCombat, "dps assist")) then pFrame.getButton("DpsAssist").setEnable() end
-	if(MultiBot.isInside(pCombat, "tank assist")) then pFrame.getButton("TankAssist").setEnable() end
-	if(MultiBot.isInside(pNormal, "stealth")) then pFrame.getButton("Stealth").setEnable() end
-	if(MultiBot.isInside(pCombat, "stealthed")) then pFrame.getButton("Stealthed").setEnable() end
-	if(MultiBot.isInside(pCombat, "boost")) then pFrame.getButton("Boost").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "dps")) then pFrame.getButton("Dps").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "dps aoe")) then pFrame.getButton("DpsAoe").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "dps assist")) then pFrame.getButton("DpsAssist").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "tank assist")) then pFrame.getButton("TankAssist").setEnable() end
+	if(MultiBot.hasStrategy(pNormal, "stealth")) then pFrame.getButton("Stealth").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "stealthed")) then pFrame.getButton("Stealthed").setEnable() end
+	if(MultiBot.hasStrategy(pCombat, "boost")) then pFrame.getButton("Boost").setEnable() end
 end
