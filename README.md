@@ -1,140 +1,117 @@
 <p align="center">
-  <img width="1024" height="1024" alt="Gemini_Generated_Image_s1mnq6s1mnq6s1mn" src="https://github.com/user-attachments/assets/08aa1768-f5c2-49ce-9fe0-a22adb184ce7" />
+  <img width="1024" height="1024" alt="MultiBot Chatless" src="https://github.com/user-attachments/assets/08aa1768-f5c2-49ce-9fe0-a22adb184ce7" />
 </p>
 
 <div align="center">
 
 # MultiBot Chatless
 
-### Bridge-first client addon for AzerothCore `mod-playerbots`
+### Bridge-first Playerbots control for World of Warcraft 3.3.5a
 
-<strong>MultiBot-Chatless</strong> is the client-side World of Warcraft 3.3.5a addon for controlling and inspecting Playerbots through a cleaner, mostly chatless UI workflow.
+<strong>MultiBot Chatless</strong> is a client addon for AzerothCore `mod-playerbots`.
+It keeps the familiar MultiBot UI while moving more bot reads and actions away from automatic chat commands and into a structured server bridge.
 
 <br>
 
-<img alt="Repository" src="https://img.shields.io/badge/repository-MultiBot--Chatless-blue" />
-<img alt="Bridge Module" src="https://img.shields.io/badge/requires-mod--multibot--bridge-orange" />
 <img alt="WoW Version" src="https://img.shields.io/badge/client-WotLK%203.3.5a-lightgrey" />
 <img alt="Architecture" src="https://img.shields.io/badge/architecture-bridge--first-success" />
-
-<br><br>
-
-<table>
-  <tr>
-    <th>Component</th>
-    <th>Repository</th>
-    <th>Install Location</th>
-  </tr>
-  <tr>
-    <td><strong>Client Addon</strong></td>
-    <td>
-      <a href="https://github.com/Wishmaster117/MultiBot-Chatless">
-        MultiBot-Chatless
-      </a>
-    </td>
-    <td>
-      <code>World of Warcraft/Interface/AddOns/MultiBot</code>
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Server Bridge Module</strong></td>
-    <td>
-      <a href="https://github.com/Wishmaster117/mod-multibot-bridge">
-        mod-multibot-bridge
-      </a>
-    </td>
-    <td>
-      <code>azerothcore/modules/mod-multibot-bridge</code>
-    </td>
-  </tr>
-</table>
+<img alt="Status" src="https://img.shields.io/badge/status-mostly%20chatless-blue" />
 
 </div>
 
 ---
 
-## Important Notice
+## Companion Bridge Required
 
-`MultiBot-Chatless` is the **addon-side repository only**.
+This repository contains the **client addon**.
 
-To get the new bridge-first / mostly chatless behavior, you also need the server-side AzerothCore module:
+For the bridge-first features you also need:
 
-<div align="center">
+### [`mod-multibot-bridge`](https://github.com/Wishmaster117/mod-multibot-bridge)
 
-### 👉 <a href="https://github.com/Wishmaster117/mod-multibot-bridge">mod-multibot-bridge</a>
+Install the addon as:
 
-</div>
+```text
+World of Warcraft/Interface/AddOns/MultiBot
+```
 
-Without the bridge module, the addon cannot use the new structured `MBOT GET~...` data flow.
+The folder must be named `MultiBot`.
 
 ---
 
-# What is MultiBot Chatless?
+# What the Addon Does
 
-MultiBot is a user interface addon for the AzerothCore [`mod-playerbots`](https://github.com/mod-playerbots/mod-playerbots) module.
+MultiBot Chatless provides a UI for controlling, inspecting and managing Playerbots without flooding normal gameplay with automatic bot chat replies.
 
-This fork focuses on removing automatic bot chat spam from the main UI refresh paths by using a dedicated AzerothCore bridge module instead of relying on legacy chat parsing.
-
-The addon now requests structured data from the server through `mod-multibot-bridge`.
-
-Examples of bridge request families (arguments omitted here for readability):
+The addon still supports intentional manual Playerbots commands where they are useful, but the main direction is:
 
 ```text
-MBOT HELLO
-MBOT PING
-GET~ROSTER
-GET~STATES
-GET~WEAPON_ENCHANT
-GET~DETAILS
-GET~STATS
-GET~PVP_STATS
-GET~TALENT_SPEC_LIST
-GET~INVENTORY
-GET~BANK
-GET~GBANK
-GET~SPELLBOOK
-GET~BOT_SKILLS
-GET~BOT_REPUTATIONS
-GET~BOT_EMBLEMS
-GET~PROFESSION_RECIPES
-GET~ENCHANT_TRADE
-GET~GLYPHS
-GET~OUTFITS
-GET~QUESTS
-GET~GAMEOBJECTS
-GET~FORMATIONS
-RUN~CRAFT_RECIPE
-RUN~ITEM_ACTION
-RUN~ITEM_EQUIP
-RUN~ITEM_UNEQUIP
-RUN~OUTFIT
-RUN~RTI
-RUN~COMBAT
-RUN~POSITION
-RUN~LOOT
-RUN~STRATEGY
-RUN~FORMATION
-RUN~GROUP_ROLL
-RUN~ENCHANT_TRADE
+UI action
+  -> structured addon message
+  -> mod-multibot-bridge
+  -> validated server-side action/read
+  -> structured result
+  -> authoritative UI refresh
 ```
 
-The Formation family uses the following complete party/raid-wide contracts:
+The project is currently **bridge-first / mostly chatless** rather than fully chatless. Remaining automatic chat paths are migrated only after targeted audit and runtime validation.
 
-```text
-RUN~FORMATION~GROUP~~<token>~<formation>
-FORMATION_ACK~GROUP~~<token>~<success>~<failure>~<formation>
+---
 
-GET~FORMATIONS~GROUP~~<token>
-FORMATIONS_BEGIN~<token>~<count>
-FORMATIONS_ITEM~<token>~<botName>~<formation>
-FORMATIONS_END~<token>~<sentCount>
-```
+# Main Features
 
-`GROUP` covers every controllable bot in the player's current party or raid. It does not target individual raid subgroups.
+| Area | Current behavior |
+| --- | --- |
+| **Bot rosters** | My Bots / Altbots, Group, Guild, Friends and Favorites with online/offline presence and structured lifecycle handling. |
+| **Bot connect / disconnect** | `ALT_ROSTER_V1`, `BOT_LIFECYCLE_V1` and `BOT_TARGET_RESOLVE_V1` provide structured discovery, target resolution and lifecycle control. Offline EveryBars stay collapsed; online EveryBars expand consistently. |
+| **Bot state & strategies** | Framed bot-state reads and structured strategy mutations for migrated controls, including Warlock selectors. |
+| **Inventory** | Bag-aware exact inventory for Backpack, Bag 1..4 and Keyring, including empty slots and container filtering. |
+| **Item movement** | Whole-stack drag/drop between supported physical inventory slots through the Bridge. |
+| **Equipment** | Structured equip and unequip workflows with authoritative refresh. |
+| **Trade & item use** | Exact-item Trade, item use and item destruction through dedicated structured actions. |
+| **Vendor** | Single-item sale, bulk Sell Vendor, Buyback and Open Items bridge workflows. |
+| **Bank / Guild Bank** | Bridge-backed views and actions; exact physical BANK/GBANK deposits are implemented. |
+| **Talents** | Premade specialization apply and editable custom talent apply with server verification. |
+| **Glyphs** | Glyph display and apply-related workflows integrated with the character UI. |
+| **Professions** | Profession recipe browsing/crafting plus targeted item recipes. |
+| **Enchanting** | Dedicated Enchanting Trade Service using the native WoW Trade workflow. |
+| **Quests** | Bridge-backed quest list and structured bot quest abandon. Native quest sharing remains available. |
+| **Loot** | Structured loot profiles and exact persistent always-loot item add/remove. |
+| **Group tools** | Formation, Roll, RTI, Pull Control, Disperse and other migrated group controls. |
+| **Character information** | Bot skills, reputations, currencies/emblems, spellbook, stats and PvP stats. |
+| **Outfits** | Outfit listing and actions through the Bridge. |
+| **SelfBot** | Dedicated enable/disable, strategy and selected action support. |
+| **Localization** | Eight runtime locales: `enUS`, `enGB`, `frFR`, `esES`, `deDE`, `ruRU`, `zhCN` and `koKR`. |
 
-## Current state and strategy capabilities
+---
 
-The addon and bridge negotiate dedicated capabilities so newer write/read paths are used only when both sides support them:
+# Recent Milestone — Alt Roster & Bot Lifecycle
+
+The roster/lifecycle work was merged and post-merge audited on **30 August 2026**.
+
+It standardizes lifecycle behavior across:
+
+- My Bots / Altbots;
+- Group;
+- Guild;
+- Friends;
+- Favorites.
+
+User-facing behavior now follows the same rule everywhere:
+
+- **offline bot** → EveryBar collapsed;
+- **online bot** → EveryBar expanded;
+- roster-specific UI state must not leak into another roster.
+
+The companion Bridge also gained the server-side lifecycle authorization and hardening required for these flows.
+
+---
+
+# Bridge Capabilities
+
+The addon negotiates feature capabilities with the Bridge before using newer paths.
+
+Important current capabilities include:
 
 ```text
 STATE_FRAMING_V1
@@ -145,391 +122,64 @@ INVENTORY_EXACT_V1
 ITEM_MOVE_V1
 ITEM_EQUIP_V1
 ITEM_UNEQUIP_V1
+ITEM_TRADE_V1
 ITEM_USE_V1
 ITEM_SELL_SINGLE_V1
 VENDOR_BUYBACK_V1
 INVENTORY_BULK_SELL_V1
 INVENTORY_OPEN_V1
+ITEM_DEPOSIT_EXACT_V1
 GROUP_ROLL_V1
 ENCHANT_TRADE_V1
+CRAFT_RECIPE_TARGET_V1
+QUEST_ABANDON_V1
+LOOT_RULE_ITEM_V1
+TALENT_APPLY_V1
+TALENT_SPEC_APPLY_V1
+SELF_BOT_V1
+SELF_STRATEGY_V1
+SELF_ACTION_V1
+ALT_ROSTER_V1
+BOT_LIFECYCLE_V1
+BOT_TARGET_RESOLVE_V1
 ```
 
-`STATE_FRAMING_V1` uses tokenized `STATE` / `STATES` transactions with framed responses, bounded payloads, cleanup on terminal errors/timeouts, and stale-response protection. Per-bot requests use a 5-second timeout; global state requests use a 15-second timeout.
-
-`STRATEGY_MUTATION_V1` provides structured `co/nc` mutations through `RUN~STRATEGY` and completion through `STRATEGY_ACK`. The bridge reports matched, succeeded and failed bot counts, while the addon applies explicit timeout and rejection diagnostics.
-
-`INVENTORY_V1` provides the established native inventory read/refresh path. `INVENTORY_EXACT_V1` complements it with exact physical topology for Backpack, Bag 1..4 and Keyring, including empty slots and per-container filtering in the inventory UI. `ITEM_MOVE_V1` adds server-authoritative whole-stack drag/drop between allowed physical slots. The addon keeps only synthetic drag state: it does not call `PickupContainerItem`, `PickupInventoryItem`, `GetCursorInfo` or `ClearCursor`, and it does not mutate the displayed inventory optimistically; an exact snapshot refresh follows the server result. Stack splitting remains outside this capability. `ITEM_EQUIP_V1` equips an exact item from Backpack or Bag 1..4 through a structured bridge request and waits for the authoritative result before refreshing. `ITEM_UNEQUIP_V1` routes Inspect right-click through the exact equipment slot plus item ID, converts client Inspect slots 1..19 to Core slots 0..18, waits for the structured result and then refreshes. The historical `ue` whisper fallback is used only when `MultiBot.allowLegacyChatFallback == true`; normal bridge-first configuration keeps that fallback disabled. `ITEM_USE_V1` uses the exact physical source, waits for the structured `INVENTORY_ITEM_USE` result and delegates execution to the native use-item path. `ITEM_DESTROY` is a specialized exact-item destruction path with server-side source revalidation and an authoritative result. `ITEM_SELL_SINGLE_V1` validates the exact source and nearby vendor before native single-item sale and returns `INVENTORY_ITEM_SELL`. `VENDOR_BUYBACK_V1` exposes a structured Buyback list/result flow and uses the native Buyback handler before authoritative inventory/list refreshes. `INVENTORY_BULK_SELL_V1` and `INVENTORY_OPEN_V1` gate the current bulk-sell and `OPEN_ITEMS` bridge paths. `GROUP_ROLL_V1` gates the group Roll workflow; normal rolls and item-linked rolls are tokenized and completed through a structured `GROUP_ROLL_ACK`. `ENCHANT_TRADE_V1` gates the Enchanting Trade Service: the addon lists only known Enchanting spells exposed by the bot, uses the native WoW Trade window and the non-traded item slot, then requests one validated numeric spell ID through the bridge.
-
-The migration is intentionally incremental. The Warlock stone, soulstone, pet and curse selectors are now migrated to structured `RUN~STRATEGY` mutations. When those selectors use the bridge, the addon waits for authoritative server `STATE` data before committing the selected UI state instead of applying an optimistic local state. Other specialized legacy UI paths still issue Playerbots chat commands directly and must be migrated before the addon can be described as fully chatless.
-
-Manual playerbot commands are still intentionally preserved for diagnostics and gameplay actions.
-
-Commands such as:
-
-```text
-who
-co ?
-nc ?
-ss ?
-```
-
-still work when the player explicitly wants to inspect a bot state.
-
-The goal is not to remove useful manual commands.  
-The goal is to remove automatic UI-refresh spam.
-
-The remaining legacy Playerbots Trade inventory dump is also suppressed locally by the addon. The filter recognizes the exact `=== Inventory ===` dump from known bots and hides that automatic dump for Inventory -> Trade, Enchanting -> Trade and the native WoW client Trade action, while leaving the Trade workflow itself unchanged.
-
-### Warlock weapon-enchant diagnostic
-
-For targeted runtime diagnostics, the addon exposes:
-
-```text
-/mbdebug enchant [bot]
-```
-
-If the bot name is omitted, the current target is used. The command sends a single `GET~WEAPON_ENCHANT` request and displays the structured `WEAPON_ENCHANT` response with main-hand/off-hand item entries, temporary enchant IDs and remaining durations. This path is diagnostic only: it is on-demand, server-authorized and rate-limited, and is not used for polling or normal selector state synchronization.
-
-The endpoint and safe Firestone/Spellstone switching code are present, but the project-level final revalidation of the real `TEMP_ENCHANTMENT_SLOT` behavior is intentionally deferred until the end of the normal roadmap.
+The exact protocol is an implementation detail of the addon and Bridge. The normal user experience should remain UI-driven.
 
 ---
 
-# Features
+# Compatibility & Legacy Chat
 
-<table>
-  <tr>
-    <th>Area</th>
-    <th>Status</th>
-  </tr>
-  <tr>
-    <td>Bridge handshake</td>
-    <td><strong>Implemented</strong> — <code>HELLO</code>, <code>HELLO_ACK</code>, <code>PING</code>, <code>PONG</code></td>
-  </tr>
-  <tr>
-    <td>Roster refresh</td>
-    <td><strong>Bridge-first</strong></td>
-  </tr>
-  <tr>
-    <td>Bot states</td>
-    <td><strong>Bridge-first, framed</strong> — <code>STATE_FRAMING_V1</code>, tokenized <code>STATE/STATES</code> transactions, bounded payloads, timeout cleanup and stale-response protection</td>
-  </tr>
-  <tr>
-    <td>Strategy mutations</td>
-    <td><strong>Bridge-first where migrated</strong> — <code>STRATEGY_MUTATION_V1</code>, <code>RUN~STRATEGY</code>, <code>STRATEGY_ACK</code> and explicit rejection/timeout diagnostics</td>
-  </tr>
-  <tr>
-    <td>Warlock strategy selectors</td>
-    <td><strong>Bridge-first and runtime validated</strong> — Stones, Soulstones, Pets and Curses use structured strategy mutations; bridge-backed selections wait for authoritative state, invalid Warlock <code>dps</code>/<code>dps debuff</code> controls and the disabled Buff placeholder were removed, and the selector layout was compacted</td>
-  </tr>
-  <tr>
-    <td>Bot details</td>
-    <td><strong>Bridge-first</strong></td>
-  </tr>
-  <tr>
-    <td>Stats</td>
-    <td><strong>Bridge-first</strong></td>
-  </tr>
-  <tr>
-    <td>PvP stats</td>
-    <td><strong>Bridge-first</strong></td>
-  </tr>
-  <tr>
-    <td>Talent spec lists</td>
-    <td><strong>Bridge-first</strong> template listing without automatic <code>talents spec list</code> chat spam</td>
-  </tr>
-  <tr>
-    <td>Inventory</td>
-    <td><strong>Bridge-first, exact and bag-aware</strong> — <code>INVENTORY_V1</code> remains the established read/refresh path, while <code>INVENTORY_EXACT_V1</code> exposes Backpack, Bag 1..4 and Keyring with physical locations, empty slots and container filters</td>
-  </tr>
-  <tr>
-    <td>Inventory item move</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_MOVE_V1</code> moves one whole stack by synthetic addon drag/drop between allowed physical slots, waits for the structured server result and refreshes the exact snapshot without using the native player cursor APIs</td>
-  </tr>
-  <tr>
-    <td>Inventory item equip</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_EQUIP_V1</code> equips one exact item from Backpack or Bag 1..4 through the Bridge, waits for the structured result and refreshes authoritatively without optimistic UI mutation</td>
-  </tr>
-  <tr>
-    <td>Inspect item unequip</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_UNEQUIP_V1</code> routes Inspect right-click by exact equipment slot and item ID; the legacy <code>ue</code> whisper is available only when <code>MultiBot.allowLegacyChatFallback == true</code> and is disabled in normal bridge-first configuration</td>
-  </tr>
-  <tr>
-    <td>Inventory item use</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_USE_V1</code> revalidates the exact physical source, executes through the native use-item path, returns a structured result and refreshes authoritatively</td>
-  </tr>
-  <tr>
-    <td>Inventory item destroy</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_DESTROY</code> uses a specialized exact-item request with server-side source revalidation and an authoritative result</td>
-  </tr>
-  <tr>
-    <td>Inventory item single sell</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>ITEM_SELL_SINGLE_V1</code> revalidates the exact source and nearby vendor, performs the native sale and returns a structured <code>INVENTORY_ITEM_SELL</code> result</td>
-  </tr>
-  <tr>
-    <td>Vendor Buyback</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>VENDOR_BUYBACK_V1</code> lists authoritative Buyback entries, executes one native buyback after server validation and refreshes inventory and Buyback state</td>
-  </tr>
-  <tr>
-    <td>Inventory bulk sell</td>
-    <td><strong>Bridge-first when supported</strong> — <code>INVENTORY_BULK_SELL_V1</code> routes <code>SELL_VENDOR</code> and the existing <code>SELL_GREY</code> action through the bridge; legacy per-item fallback remains a compatibility path, and further SELL_GREY work is deferred</td>
-  </tr>
-  <tr>
-    <td>Open items</td>
-    <td><strong>Bridge-first and validated</strong> — <code>INVENTORY_OPEN_V1</code> / <code>OPEN_ITEMS</code> with structured result handling and no silent chat fallback in normal bridge-first use</td>
-  </tr>
-  <tr>
-    <td>Group Roll</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>GROUP_ROLL_V1</code> supports normal 0–100 rolls and Shift+click item rolls with tokenized pending state, duplicate-send protection and structured ACK handling</td>
-  </tr>
-  <tr>
-    <td>Spellbook</td>
-    <td><strong>Bridge-first</strong> combat spell listing separated from profession recipe data</td>
-  </tr>
-  <tr>
-    <td>Character Info frame</td>
-    <td><strong>Bridge-first</strong> Blizzard-style tabs for skills, reputations and currencies/emblems</td>
-  </tr>
-  <tr>
-    <td>Bot bank / guild bank / vendor buy</td>
-    <td><strong>Bridge-first</strong> bank snapshots, guild bank snapshots, bank deposit/withdraw, guild bank deposit/withdraw and vendor buy actions</td>
-  </tr>
-  <tr>
-    <td>Profession recipe frame</td>
-    <td><strong>Bridge-first</strong> recipe listing and recipe crafting opened from Character Info profession and secondary skill rows</td>
-  </tr>
-  <tr>
-    <td>Enchanting Trade Service</td>
-    <td><strong>Bridge-first and runtime validated</strong> — <code>ENCHANT_TRADE_V1</code> exposes known Enchanting services, reagent/tool availability and native Trade-slot execution without a generic cast/chat executor; the same dedicated window is available from the enchanter EveryBar and Character Info, with UI text localized in all eight runtime locales</td>
-  </tr>
-  <tr>
-    <td>Trade inventory chat suppression</td>
-    <td><strong>Runtime validated</strong> — the legacy Playerbots <code>=== Inventory ===</code> Trade-start dump is hidden for Inventory, Enchanting and native client Trade openings; the filter is limited to the exact dump sequence from known bots and does not modify Playerbots or the Bridge</td>
-  </tr>
-  <tr>
-    <td>Glyphs</td>
-    <td><strong>Bridge-first</strong> with glyph icons and tooltips</td>
-  </tr>  <tr>
-    <td>Loot rules</td>
-    <td><strong>Bridge-first</strong> loot enable/disable and loot list profiles through <code>RUN~LOOT</code></td>
-  </tr>
-  <tr>
-    <td>Loot Master frame</td>
-    <td><strong>Implemented</strong> optional auto-opening master-loot UI with candidate scoring, preferences and recent loot history</td>
-  </tr>
-  <tr>
-    <td>Units / EveryBars</td>
-    <td><strong>Improved</strong> login, reload and AddClass refresh behavior</td>
-  </tr>
-  <tr>
-    <td>Random bot visibility</td>
-    <td><strong>Improved</strong> bridge-visible grouped randombots alongside AddClass bots and altbots</td>
-  </tr>
-  <tr>
-    <td>Party / raid formation controls</td>
-    <td><strong>Bridge-first and chatless</strong> — left-click applies one formation to every controllable bot in the current party or raid through <code>RUN~FORMATION</code>; right-click reads each bot's effective formation through <code>GET~FORMATIONS</code> and displays a localized tooltip</td>
-  </tr>
-  <tr>
-    <td>Legacy automatic chat fallback</td>
-    <td><strong>Disabled by default</strong></td>
-  </tr>
-  <tr>
-    <td>Outfits</td>
-    <td><strong>Bridge-first</strong> listing, create/update, reset, equip and replace</td>
-  </tr>
-  <tr>
-    <td>Quests</td>
-    <td><strong>Bridge-first</strong> incompleted, completed and all quest lists with dark result frames and per-bot abandon buttons</td>
-  </tr>
-  <tr>
-    <td>Game object search</td>
-    <td><strong>Bridge-first</strong> results and copy frame without localized chat parsing</td>
-  </tr>
-  <tr>
-    <td>RTI controls</td>
-    <td><strong>Bridge-first</strong> icon assignment and RTI target actions</td>
-  </tr>
-  <tr>
-    <td>Pull Control</td>
-    <td><strong>Bridge-first</strong> wait, focus, DPS assist, AoE and RTI pull/attack controls</td>
-  </tr>
-  <tr>
-    <td>Combat strategy fine tuning</td>
-    <td><strong>Bridge-first</strong> avoid AoE, save mana, threat and behind controls</td>
-  </tr>
-  <tr>
-    <td>Disperse controls</td>
-    <td><strong>Bridge-first</strong> distance set and disable actions through <code>RUN~POSITION</code></td>
-  </tr>
-  <tr>
-    <td>Loot rules</td>
-    <td><strong>Bridge-first</strong> loot enable/disable and loot list profiles through <code>RUN~LOOT</code></td>
-  </tr>
-  <tr>
-    <td>Loot Master frame</td>
-    <td><strong>Implemented</strong> optional auto-opening master-loot UI with candidate scoring, preferences and recent loot history</td>
-  </tr>
-  <tr>
-    <td>Units / EveryBars</td>
-    <td><strong>Improved</strong> login, reload and AddClass refresh behavior</td>
-  </tr>
-  <tr>
-    <td>Random bot visibility</td>
-    <td><strong>Improved</strong> bridge-visible grouped randombots alongside AddClass bots and altbots</td>
-  </tr>
-  <tr>
-    <td>Legacy automatic chat fallback</td>
-    <td><strong>Disabled by default</strong></td>
-  </tr>
-</table>
+The addon deliberately keeps some manual Playerbots commands for diagnostics and explicit gameplay use.
 
----
-
-# Requirements
-
-## Client
-
-- World of Warcraft 3.3.5a / Wrath of the Lich King client.
-- Tested with:
-  - English / US client
-  - German client
-  - French client
-  - Spanish client
-- Localization files included for <code>enUS</code>, <code>enGB</code>, <code>frFR</code>, <code>esES</code>, <code>deDE</code>, <code>ruRU</code>, <code>zhCN</code> and <code>koKR</code>.
-
-## Server
-
-- [`AzerothCore WotLK`](https://github.com/mod-playerbots/azerothcore-wotlk/tree/Playerbot).
-- [`mod-playerbots`](https://github.com/mod-playerbots/mod-playerbots).
-- [`mod-multibot-bridge`](https://github.com/Wishmaster117/mod-multibot-bridge).
-
----
-
-# Installation
-
-## 1. Install the server-side bridge module
-
-Clone the bridge module inside your AzerothCore `modules` directory:
-
-```bash
-cd /path/to/azerothcore/modules
-git clone https://github.com/Wishmaster117/mod-multibot-bridge.git mod-multibot-bridge
-```
-
-Expected structure:
-
-```text
-azerothcore/
-└── modules/
-    └── mod-multibot-bridge/
-        ├── conf/
-        └── src/
-```
-
-Then:
-
-1. Re-run CMake if required by your build workflow.
-2. Rebuild AzerothCore.
-3. Copy/install the generated configuration file if required.
-4. Start the server.
-5. Check that `mod-multibot-bridge` is loaded.
-
-When the addon connects successfully, the server console should show messages similar to:
-
-```text
-MBOT HELLO
-MBOT HELLO_ACK
-MBOT PING
-MBOT PONG
-GET~ROSTER
-GET~STATES
-GET~DETAILS
-```
-
----
-
-## 2. Install the client addon
-
-Clone this repository into your World of Warcraft AddOns directory.
-
-```bash
-cd "World of Warcraft/Interface/AddOns"
-git clone https://github.com/Wishmaster117/MultiBot-Chatless.git MultiBot
-```
-
-Expected structure:
-
-```text
-World of Warcraft/
-└── Interface/
-    └── AddOns/
-        └── MultiBot/
-            ├── MultiBot.toc
-            ├── Core/
-            ├── Data/
-            ├── Features/
-            ├── Icons/
-            ├── Libs/
-            ├── Locales/
-            ├── Strategies/
-            ├── Textures/
-            └── UI/
-```
-
-> The GitHub repository is named `MultiBot-Chatless`, but the local addon folder must be named `MultiBot`.
-
-Do not install it like this:
-
-```text
-Interface/AddOns/MultiBot/MultiBot/MultiBot.toc
-```
-
-The `.toc` file must be directly here:
-
-```text
-Interface/AddOns/MultiBot/MultiBot.toc
-```
-
----
-
-# Updating
-
-## Update the addon
-
-```bash
-cd "World of Warcraft/Interface/AddOns/MultiBot"
-git pull
-```
-
-## Update the bridge module
-
-```bash
-cd /path/to/azerothcore/modules/mod-multibot-bridge
-git pull
-```
-
-Then rebuild your AzerothCore server if the module code changed.
-
----
-
-# Recommended Configuration
-
-For normal bridge-first usage, keep legacy automatic chat fallback disabled:
+Automatic compatibility fallback is disabled by default:
 
 ```lua
 MultiBot.allowLegacyChatFallback = false
 ```
 
-Only enable it temporarily for debugging or compatibility testing:
+When a migrated Bridge feature is available, the addon should prefer the structured path and wait for authoritative server state instead of pretending an action succeeded locally.
 
-```lua
-MultiBot.allowLegacyChatFallback = true
+---
+
+# Installation
+
+1. Install and configure AzerothCore with `mod-playerbots`.
+2. Install [`mod-multibot-bridge`](https://github.com/Wishmaster117/mod-multibot-bridge) on the server and rebuild AzerothCore.
+3. Copy or clone this repository as:
+
+```text
+World of Warcraft/Interface/AddOns/MultiBot
 ```
+
+4. Start the server and log into the WoW 3.3.5a client.
+5. Confirm the addon and Bridge handshake successfully.
 
 ---
 
 # Usage
 
-Start World of Warcraft and use one of the following commands:
+Open MultiBot with any of these slash commands:
 
 ```text
 /multibot
@@ -537,380 +187,84 @@ Start World of Warcraft and use one of the following commands:
 /mb
 ```
 
-You can also use the minimap button.
+You can also open the addon from its minimap button.
 
-When the bridge is available, the addon automatically uses structured bridge messages for the main UI refresh paths instead of legacy chat replies.
-
-Manual commands are still available when you intentionally want them.
-
-Examples:
-
-```text
-/w BotName who
-/w BotName co ?
-/w BotName nc ?
-/w BotName ss ?
-```
-
----
-
-# Bridge-First Architecture
-
-<div align="center">
-
-<table>
-  <tr>
-    <th>Old behavior</th>
-    <th>New behavior</th>
-  </tr>
-  <tr>
-    <td>Addon triggers bot commands</td>
-    <td>Addon sends structured <code>MBOT GET~...</code> requests</td>
-  </tr>
-  <tr>
-    <td>Bots answer with chat text</td>
-    <td>Bridge returns structured addon messages</td>
-  </tr>
-  <tr>
-    <td>Addon parses localized chat lines</td>
-    <td>Addon consumes stable protocol payloads</td>
-  </tr>
-  <tr>
-    <td>Automatic UI refresh creates chat spam</td>
-    <td>Main UI refresh paths are mostly chatless</td>
-  </tr>
-</table>
-
-</div>
+When the Bridge is available, supported UI actions automatically use the structured bridge-first path; you do not need to type protocol commands manually.
 
 ---
 
 # Current Status
 
-Implemented bridge-first / chatless areas:
+The major read paths and a large part of the action surface are now bridge-first and runtime validated.
 
-- Bridge handshake: `HELLO`, `HELLO_ACK`, `PING`, `PONG`.
-- Roster refresh.
-- Bot states through `STATE_FRAMING_V1`, with tokenized per-bot/global transactions, framed responses, bounded state payloads, timeout cleanup and stale-response protection.
-- Strategy mutations through `STRATEGY_MUTATION_V1` for migrated controls, with `RUN~STRATEGY`, `STRATEGY_ACK`, result counters and explicit rejection/timeout diagnostics.
-- Bot details refresh.
-- Stats refresh.
-- PvP stats refresh.
-- Talent spec list refresh.
-- Inventory read/refresh through `INVENTORY_V1`, complemented by `INVENTORY_EXACT_V1` for bag-aware physical topology across Backpack, Bag 1..4 and Keyring, including empty slots and per-container filters.
-- Whole-stack inventory drag/drop through `ITEM_MOVE_V1`, with synthetic addon drag state, no native player cursor APIs, no optimistic inventory mutation and an exact snapshot refresh after the structured server result. Stack splitting remains out of scope.
-- Exact inventory equip through `ITEM_EQUIP_V1`, with source identity revalidation, authoritative result handling and no optimistic UI mutation.
-- Exact Inspect unequip through `ITEM_UNEQUIP_V1`, with exact equipment slot/item identity and legacy `ue` fallback disabled unless explicitly enabled.
-- Exact item use through `ITEM_USE_V1`, with native use-item execution, source revalidation, structured result handling and localized failure reasons.
-- Exact item destruction through the specialized `ITEM_DESTROY` path with server-side source revalidation.
-- Exact single-item vendor sale through `ITEM_SELL_SINGLE_V1`, with nearby-vendor validation, protected-item guards, replay/rate limiting and structured result handling.
-- Vendor Buyback through `VENDOR_BUYBACK_V1`, with structured list/result messages, native Buyback execution and authoritative inventory/list refreshes.
-- Bulk inventory sell through `INVENTORY_BULK_SELL_V1` when supported; `SELL_VENDOR` is bridge-first in normal current operation, while legacy compatibility fallback remains available and SELL_GREY follow-up is deferred.
-- `OPEN_ITEMS` through `INVENTORY_OPEN_V1`, with structured result handling and no silent chat fallback in the normal bridge-first path.
-- Group Roll through `GROUP_ROLL_V1`: normal 0–100 roll and Shift+click item roll, tokenized pending state, duplicate-send protection, timeout/cleanup handling and structured `GROUP_ROLL_ACK`.
-- Spellbook refresh, with profession/crafting spells separated from the combat spellbook path.
-- Character Info frame through the bridge with Blizzard-style tabs for class, profession, secondary, weapon and armor skills, reputations and currencies/emblems.
-- Bot bank and guild bank snapshots through the bridge, plus bank deposit/withdraw, guild bank deposit/withdraw and vendor buy item actions.
-- Profession recipe frame through the bridge, opened from profession and secondary skill rows.
-- Enchanting Trade Service through `ENCHANT_TRADE_V1`: dedicated enchanter-only UI from EveryBar/Character Info, known-spell listing, reagent/tool availability, native `TRADE_SLOT_NONTRADED` targeting and validated numeric spell execution without generic Playerbots command/chat dispatch.
-- Glyph refresh with icons and glyph tooltips.
-- Outfits refresh and actions through the bridge.
-- Outfit equip/replace without detailed `Equipping [item] ...` chat spam.
-- Quest list refresh through the bridge.
-- Game object search results and copy frame through the bridge.
-- RTI controls through the bridge.
-- Pull Control frame through the bridge.
-- Combat strategy fine tuning through the bridge.
-- Disperse controls through the bridge with `disperse set <yards>` and `disperse disable`.
-- Party/raid-wide formation application through `RUN~FORMATION`, with per-bot effective formation inspection through `GET~FORMATIONS` and no PARTY/RAID chat output.
-- Localized formation status tooltip for all eight addon locale files.
-- Loot rules through the bridge with `nc +loot`, `nc -loot` and `ll all|normal|gray|quest|skill`.
-- Loot Master UI for master-loot distribution with item tooltips, candidate scoring, profession/spec hints, saved preferences and recent loot history.
-- Bridge-visible bot discovery for AddClass bots, altbots and grouped randombots.
-- Custom glyph socket mapping and apply order.
-- Talent tab navigation stability after switching between tabs.
-- Automatic bot reconnect on login/reload for bots already present in the group or raid.
-- Units bar refresh after adding a bot through AddClass.
+The project is **not declared fully chatless yet**. Remaining `SendChatMessage` paths are handled family by family so that useful manual commands are not removed accidentally and legacy compatibility is not broken without testing.
 
-Validated development milestones on the current line:
+The next normal roadmap item is a targeted audit of collective:
 
-- PR #49 — bridge synchronization, strategy controls, persistent/offline favorites and STATE stabilization.
-- PR #50 — explicit strategy-command rejection diagnostics.
-- PR #51 — mechanical deduplication of shared roster workflow helpers.
-- PR #53 — prevent silent chat fallback for strategy mutations.
-- PR #54 — outfit actions migrated to the negotiated bridge capability.
-- PR #55 — strict bridge routing for inventory read/refresh.
-- PR #58 — single-bot inventory Sell Vendor migrated to the bridge.
-- PR #60 — bridge-first `OPEN_ITEMS`.
-- PR #61 — chatless Group Roll UI, merged as `106074c3c93f80812f73af27e746860c7c8a4dcf`.
-- Final static STATE/strategy audit on 2026-08-07: 57 checks, 0 failures; final manual runtime matrix remains pending.
-- Warlock selector batch is migrated to bridge strategy mutations; final project-level real TEMP_ENCHANT revalidation and the four remaining LuaLint warnings are explicitly deferred.
-- Group Roll runtime validation on 2026-08-14: normal roll, item roll, eligibility, no chat spam, duplicate protection, invalid/empty item rejection and pending cleanup all validated.
-- Enchanting Trade Service runtime validation on 2026-08-14: enchanter-only button, list/search/tooltips, localized 440 px frame, normal WoW Trade flow and real item enchant application all validated with no automatic chat executor.
+```text
+follow
+attack
+stay
+```
 
-Known migration remaining:
+No generic arbitrary Playerbots command executor is planned.
 
-- Remaining direct `SendChatMessage` occurrences outside migrated paths still need to be classified as manual command, diagnostic fallback, information message, UI mechanism to migrate, compatibility fallback, or dead code.
-- Item enchanting is now **implemented and runtime validated** through the closed `ENCHANT_TRADE_V1` Trade Service; it does not expose a generic cast or arbitrary Playerbots command executor.
-- The next normal roadmap item is **item-specific loot-rule add/remove**, followed by the Quest/Skill versus Disenchant decision and collective `follow` / `attack` / `stay` orders.
-- The project should be described as **bridge-first / mostly chatless**, not fully chatless, until these remaining paths are classified/migrated and the final runtime matrix is closed.
-
-Kept intentionally:
-
-- Manual whisper/playerbot commands for diagnostics.
-- Commands such as `who`, `co ?`, `nc ?`, `ss ?`.
-- Gameplay write actions that still rely on existing playerbot commands.
-- Optional legacy fallback behavior only for debugging or compatibility.
+Detailed development history, audits, deferred work and technical residuals are tracked in the project documentation.
 
 ---
 
-# Remaining Work
+# Documentation
 
-The current line includes bridge-first inventory refresh, exact bag-aware inventory topology, native whole-stack item drag/drop, outfits, Sell Vendor, `OPEN_ITEMS`, Group Roll and the runtime-validated Enchanting Trade Service in addition to the previously migrated UI areas. The roadmap is intentionally continuing feature-family by feature-family rather than jumping directly to final cleanup.
-
-Next normal roadmap work:
-
-1. Audit and implement item-specific loot-rule add/remove using verified Playerbots interfaces only.
-2. Decide the Quest/Skill versus Disenchant path from verified Playerbots capabilities.
-3. Audit collective `follow`, `attack` and `stay` selectors before any structured group-order migration.
-
-Explicitly deferred until the normal roadmap is complete:
-
-- SELL_GREY / sell-grey core API / bridge-first follow-up.
-- Final real Firestone/Spellstone `TEMP_ENCHANTMENT_SLOT` revalidation.
-- Four remaining LuaLint warnings in `Strategies/MultiBotWarlock.lua`.
-- Other small items that were explicitly deferred during previous validated batches.
-
-Ongoing finalization work remains unchanged: regression testing, classification of residual `SendChatMessage` paths, removal of dead legacy parsers only after proof of non-regression, and documentation/screenshot cleanup after wider testing.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — technical source of truth, completed milestones, audit references, next work and deferred backlog.
+- [`docs/DEBUG_RUNBOOK.md`](docs/DEBUG_RUNBOOK.md) — in-game debug commands, observability guidance and bug-report procedure.
 
 ---
 
-# Troubleshooting
+# Deferred / Lower-Priority Work
 
-<details>
-<summary><strong>The addon does not load</strong></summary>
+The active roadmap currently keeps these items outside the next normal feature batch:
 
-Check that the folder is named exactly:
-
-```text
-Interface/AddOns/MultiBot
-```
-
-and that the `.toc` file is here:
-
-```text
-Interface/AddOns/MultiBot/MultiBot.toc
-```
-
-If the `.toc` file is inside another nested `MultiBot` folder, the addon is installed incorrectly.
-
-</details>
-
-<details>
-<summary><strong>The addon loads but the bridge does not connect</strong></summary>
-
-Check that:
-
-- `mod-multibot-bridge` is installed in the AzerothCore `modules` directory.
-- AzerothCore was rebuilt after installing the module.
-- The server was restarted after rebuilding.
-- The bridge module is visible in server logs.
-- Your client is logged into a character connected to the server.
-
-</details>
-
-<details>
-<summary><strong>I still see some chat messages</strong></summary>
-
-This project removes automatic UI-refresh spam where the bridge path has been implemented.
-
-Manual commands and gameplay actions may still produce intentional messages.
-
-Make sure this value is disabled unless you are debugging:
-
-```lua
-MultiBot.allowLegacyChatFallback = false
-```
-
-</details>
-
-<details>
-<summary><strong>The formation tooltip does not appear or is incomplete</strong></summary>
-
-Check that the bridge is connected and that the bots are controllable members of the same party or raid as the player.
-
-A right-click on the Formation button should produce structured bridge traffic similar to:
-
-```text
-GET~FORMATIONS~GROUP~~<token>
-FORMATIONS_BEGIN~<token>~<count>
-FORMATIONS_ITEM~<token>~<botName>~<formation>
-FORMATIONS_END~<token>~<sentCount>
-```
-
-The query is raid-wide: it includes all controllable bots in the current party or raid and does not target individual raid subgroups.
-
-</details>
-
-<details>
-<summary><strong>Inventory, spellbook, glyphs or outfits do not update</strong></summary>
-
-Check the server console for bridge requests such as:
-
-```text
-GET~INVENTORY
-GET~BANK
-GET~GBANK
-GET~SPELLBOOK
-GET~GLYPHS
-GET~OUTFITS
-GET~BOT_SKILLS
-GET~BOT_REPUTATIONS
-GET~BOT_EMBLEMS
-GET~PROFESSION_RECIPES
-GET~QUESTS
-GET~GAMEOBJECTS
-```
-
-If these requests do not appear, the addon may not be connected to the bridge.
-
-</details>
-
-<details>
-<summary><strong>The Loot Master frame does not open</strong></summary>
-
-Check that:
-
-- The Loot Master UI option is enabled in the addon options.
-- The group loot method is set to Master Loot.
-- Your character is the detected master looter.
-- The opened loot contains relevant loot slots.
-
-The frame uses the client master-loot candidate API and enriches candidates with cached bridge details when available.
-
-</details>
-
-<details>
-<summary><strong>The Loot Master frame does not open</strong></summary>
-
-Check that:
-
-- The Loot Master UI option is enabled in the addon options.
-- The group loot method is set to Master Loot.
-- Your character is the detected master looter.
-- The opened loot contains relevant loot slots.
-
-The frame uses the client master-loot candidate API and enriches candidates with cached bridge details when available.
-
-</details>
-
----
-
-# Project Documentation
-
-The active project documentation is intentionally limited to two files:
-
-- [Development roadmap](docs/ROADMAP.md) — current phases, priorities, risks and acceptance criteria.
-- [Debug and observability runbook](docs/DEBUG_RUNBOOK.md) — in-game debug commands, performance counters and bug-report procedure.
-
----
-
-# Repository Layout
-
-```text
-MultiBot-Chatless/
-├── Core/
-├── Data/
-├── Features/
-├── Icons/
-├── Libs/
-├── Locales/
-├── Strategies/
-├── Textures/
-├── UI/
-├── docs/
-│   ├── DEBUG_RUNBOOK.md
-│   └── ROADMAP.md
-└── MultiBot.toc
-```
-
----
-
-# Related Repositories
-
-<table>
-  <tr>
-    <th>Repository</th>
-    <th>Description</th>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://github.com/Wishmaster117/MultiBot-Chatless">
-        MultiBot-Chatless
-      </a>
-    </td>
-    <td>
-      Client-side World of Warcraft addon.
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://github.com/Wishmaster117/mod-multibot-bridge">
-        mod-multibot-bridge
-      </a>
-    </td>
-    <td>
-      AzerothCore server-side bridge module.
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://github.com/Wishmaster117/MultiBot-Standalone">
-        MultiBot-Standalone
-      </a>
-    </td>
-    <td>
-      Deprecated combined repository kept for history.
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://github.com/mod-playerbots/mod-playerbots">
-        mod-playerbots
-      </a>
-    </td>
-    <td>
-      Original AzerothCore Playerbots module.
-    </td>
-  </tr>
-</table>
+- exact BANK withdrawal (P3B);
+- exact Guild Bank withdrawal (P3C);
+- dedicated localized `SOURCE_STALE` UI text;
+- moving/re-equipping the equipped bag objects themselves (`BAG_MOVE`);
+- `SELL_GREY` follow-up;
+- final real Firestone/Spellstone `TEMP_ENCHANTMENT_SLOT` revalidation;
+- remaining Warlock LuaLint warnings;
+- selected lifecycle/idempotence hardening for older pending-command flows.
 
 ---
 
 # Credits
 
-MultiBot is built for use with AzerothCore `mod-playerbots`.
+MultiBot Chatless builds on the AzerothCore and `mod-playerbots` ecosystem.
 
-Thanks to <b>Macx-Lio</b> for the original MultiBot Module.
+Special thanks to **Macx-Lio** for the original MultiBot Module that this project builds upon.
 
-Thanks to the Playerbots team and the AzerothCore community.
+The project also retains attribution for the external **Jellypowered** bridge work that was audited and selectively adapted during the chatless migration. Details and commit references are preserved in the project roadmap.
 
 ---
 
-<div align="center">
+# Troubleshooting
 
-## MultiBot Chatless
+### The addon does not load
 
-<strong>Less automatic chat spam. Cleaner UI refreshes. Bridge-first bot data.</strong>
+Confirm the folder is named exactly:
 
-<br><br>
+```text
+MultiBot
+```
 
-<a href="https://github.com/Wishmaster117/MultiBot-Chatless">
-  Client Addon
-</a>
-&nbsp;•&nbsp;
-<a href="https://github.com/Wishmaster117/mod-multibot-bridge">
-  Bridge Module
-</a>
+and is located under:
 
-</div>
+```text
+World of Warcraft/Interface/AddOns/
+```
+
+### Bridge features are unavailable
+
+Confirm `mod-multibot-bridge` is installed, configured, compiled and loaded by the same AzerothCore server used by the client.
+
+### I still see some Playerbots chat
+
+That does not automatically mean the Bridge is broken. Manual commands and a small number of intentionally retained or not-yet-migrated paths still exist while the project remains **mostly chatless**.
